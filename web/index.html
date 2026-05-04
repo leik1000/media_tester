@@ -425,10 +425,7 @@
                     <div v-if="results.length" class="grid grid-cols-5 gap-3">
                         <button v-for="item in paginatedResults" :key="item.id" @click="openPreview(item)" :draggable="item.status === 'completed' && !!item.url" @dragstart="onResultDragStart($event, item)" class="group overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] text-left shadow-lg backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-indigo-300/40 hover:bg-white/[0.07] hover:shadow-[0_18px_45px_rgba(79,70,229,0.22)]">
                             <div class="relative aspect-video overflow-hidden bg-black/30">
-                                <img v-if="item.status === 'completed' && item.type === 'image'" :src="item.url" class="h-full w-full object-cover transition duration-500 group-hover:scale-105">
-                                <video v-else-if="item.status === 'completed' && item.type === 'video'" muted preload="metadata" class="h-full w-full object-cover transition duration-500 group-hover:scale-105">
-                                    <source :src="item.url" type="video/mp4">
-                                </video>
+                                <img v-if="item.status === 'completed'" :src="item.thumbnailUrl || item.thumbnail_url || item.url" class="h-full w-full object-cover transition duration-500 group-hover:scale-105">
                                 <div v-else-if="item.status === 'error' || item.status === 'failed'" class="flex h-full w-full flex-col items-center justify-center bg-red-950/30 p-4 text-center">
                                     <svg class="mb-3 h-9 w-9 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"></path></svg>
                                     <p class="line-clamp-2 text-xs text-red-100">{{ item.error || '任务失败' }}</p>
@@ -556,6 +553,6 @@
         @keyframes shimmer { 100% { transform: translateX(100%); } }
         @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
-    <script src="/static/app.js?v=20260504-auth-gallery-fix"></script>
+    <script src="/static/app.js?v=20260504-thumbnails"></script>
 </body>
 </html>

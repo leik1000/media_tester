@@ -1,12 +1,11 @@
 import uuid
-import base64
 import hashlib
 import hmac
 import json
 import mimetypes
 import secrets
 import sqlite3
-import threading
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -30,14 +29,15 @@ app.mount("/static", StaticFiles(directory="web"), name="static")
 tasks_store: Dict[str, Dict[str, Any]] = {}
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
 DOWNLOAD_DIR = Path(__file__).resolve().parent / "downloads"
+THUMB_DIR = DOWNLOAD_DIR / "thumbs"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CONFIG_DB_PATH = DATA_DIR / "config.db"
-MANIFEST_PATH = DOWNLOAD_DIR / "manifest.json"
 SESSION_COOKIE = "media_tester_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
-manifest_lock = threading.Lock()
+THUMBNAIL_SIZE = (480, 270)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+THUMB_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/downloads", StaticFiles(directory=str(DOWNLOAD_DIR)), name="downloads")
 
 
@@ -53,6 +53,37 @@ def init_config_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS media_tasks (
+                id TEXT PRIMARY KEY,
+                remote_task_id TEXT,
+                type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                model TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                meta TEXT,
+                request_payload TEXT,
+                logs TEXT NOT NULL DEFAULT '[]',
+                error TEXT,
+                raw TEXT,
+                local_url TEXT,
+                remote_url TEXT,
+                filename TEXT,
+                thumbnail_url TEXT,
+                thumbnail_filename TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_seconds INTEGER
+            )
+            """
+        )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(media_tasks)").fetchall()}
+        if "thumbnail_url" not in columns:
+            conn.execute("ALTER TABLE media_tasks ADD COLUMN thumbnail_url TEXT")
+        if "thumbnail_filename" not in columns:
+            conn.execute("ALTER TABLE media_tasks ADD COLUMN thumbnail_filename TEXT")
 
 
 def read_saved_config() -> dict[str, Any]:
@@ -262,6 +293,160 @@ def now_label() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def json_loads(value: str | None, default: Any) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
+
+
+def task_meta(task_type: str, settings: dict[str, Any]) -> str:
+    if task_type == "image":
+        meta = f"{settings.get('image_size')} · {settings.get('aspect_ratio')}"
+        if image_runner.is_openai_image_model(str(settings.get("model") or "")):
+            meta = f"{meta} · {settings.get('quality') or image_runner.DEFAULT_OPENAI_QUALITY}"
+        return meta
+    return f"{settings.get('duration')}s · {settings.get('aspect_ratio')} · {settings.get('resolution')}"
+
+
+def db_create_task(task_id: str, task_type: str, settings: dict[str, Any]) -> None:
+    now = now_label()
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO media_tasks (
+                id, type, status, model, prompt, meta, logs, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                task_type,
+                "pending",
+                str(settings.get("model") or ""),
+                str(settings.get("prompt") or ""),
+                task_meta(task_type, settings),
+                "[]",
+                now,
+            ),
+        )
+
+
+def db_update_task(task_id: str, **fields: Any) -> None:
+    allowed = {
+        "remote_task_id", "status", "request_payload", "logs", "error", "raw",
+        "local_url", "remote_url", "filename", "thumbnail_url",
+        "thumbnail_filename", "started_at", "finished_at", "duration_seconds",
+    }
+    updates = []
+    values = []
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        if key in {"request_payload", "logs", "raw"}:
+            value = json_dumps(value)
+        updates.append(f"{key} = ?")
+        values.append(value)
+    if not updates:
+        return
+    values.append(task_id)
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        conn.execute(f"UPDATE media_tasks SET {', '.join(updates)} WHERE id = ?", values)
+
+
+def db_mark_started(task_id: str, store: dict[str, Any]) -> None:
+    started_at = now_label()
+    store["started_at"] = started_at
+    store["started_ts"] = time.time()
+    db_update_task(task_id, status="running", started_at=started_at, logs=store.get("logs") or [])
+
+
+def db_mark_finished(task_id: str, store: dict[str, Any], status: str) -> None:
+    finished_at = now_label()
+    duration = None
+    started_ts = store.get("started_ts")
+    if started_ts:
+        duration = max(0, int(round(time.time() - float(started_ts))))
+    store["finished_at"] = finished_at
+    store["duration_seconds"] = duration
+    db_update_task(
+        task_id,
+        status=status,
+        finished_at=finished_at,
+        duration_seconds=duration,
+        logs=store.get("logs") or [],
+        error=store.get("error"),
+        raw=store.get("raw"),
+    )
+
+
+def db_task_to_client(row: sqlite3.Row) -> dict[str, Any]:
+    status = str(row["status"] or "")
+    local_url = row["local_url"]
+    thumbnail_url = row["thumbnail_url"]
+    return {
+        "id": row["id"],
+        "taskId": row["id"],
+        "internal_task_id": row["id"],
+        "api_task_id": row["remote_task_id"],
+        "apiTaskId": row["remote_task_id"],
+        "type": row["type"],
+        "status": status,
+        "model": row["model"],
+        "prompt": row["prompt"],
+        "meta": row["meta"],
+        "url": local_url,
+        "local_url": local_url,
+        "thumbnail_url": thumbnail_url,
+        "thumbnailUrl": thumbnail_url,
+        "image_url": local_url if row["type"] == "image" else None,
+        "media_url": local_url if row["type"] == "video" else None,
+        "asset": {
+            "url": local_url,
+            "filename": row["filename"],
+            "remote_url": row["remote_url"],
+            "thumbnail_url": thumbnail_url,
+            "thumbnailUrl": thumbnail_url,
+            "thumbnail_filename": row["thumbnail_filename"],
+            "createdAt": row["created_at"],
+        } if local_url else None,
+        "remote_url": row["remote_url"],
+        "filename": row["filename"],
+        "thumbnail_filename": row["thumbnail_filename"],
+        "logs": json_loads(row["logs"], []),
+        "error": row["error"],
+        "raw": json_loads(row["raw"], None),
+        "request_payload": json_loads(row["request_payload"], None),
+        "requestPayload": json_loads(row["request_payload"], None),
+        "createdAt": row["created_at"],
+        "startedAt": row["started_at"],
+        "finishedAt": row["finished_at"],
+        "durationSeconds": row["duration_seconds"],
+    }
+
+
+def db_get_task(task_id: str) -> dict[str, Any] | None:
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM media_tasks WHERE id = ?", (task_id,)).fetchone()
+    return db_task_to_client(row) if row else None
+
+
+def db_list_tasks(limit: int = 200) -> list[dict[str, Any]]:
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM media_tasks ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [db_task_to_client(row) for row in rows]
+
+
 def choose_image_suffix(mime_type: str) -> str:
     suffix = mimetypes.guess_extension(str(mime_type or "").split(";", 1)[0].strip())
     if suffix == ".jpe":
@@ -270,30 +455,48 @@ def choose_image_suffix(mime_type: str) -> str:
 
 
 def public_download_url(path: Path) -> str:
-    return f"/downloads/{path.name}"
-
-
-def read_manifest() -> list[dict[str, Any]]:
-    if not MANIFEST_PATH.is_file():
-        return []
     try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
+        relative = path.relative_to(DOWNLOAD_DIR).as_posix()
+    except ValueError:
+        relative = path.name
+    return f"/downloads/{relative}"
 
 
-def write_manifest(items: list[dict[str, Any]]) -> None:
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+def save_image_thumbnail(source_path: Path, asset_id: str) -> dict[str, str] | None:
+    try:
+        from PIL import Image, ImageOps
+
+        THUMB_DIR.mkdir(parents=True, exist_ok=True)
+        thumb_path = THUMB_DIR / f"thumb_{asset_id}.jpg"
+        with Image.open(source_path) as image:
+            fitted = ImageOps.fit(image.convert("RGB"), THUMBNAIL_SIZE, method=Image.Resampling.LANCZOS)
+            fitted.save(thumb_path, "JPEG", quality=82, optimize=True)
+        return {"thumbnail_url": public_download_url(thumb_path), "thumbnail_filename": thumb_path.name}
+    except Exception:
+        return None
 
 
-def register_asset(asset: dict[str, Any]) -> dict[str, Any]:
-    with manifest_lock:
-        items = read_manifest()
-        items.insert(0, asset)
-        write_manifest(items)
-    return asset
+def save_video_thumbnail(source_path: Path, asset_id: str) -> dict[str, str] | None:
+    THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    thumb_path = THUMB_DIR / f"thumb_{asset_id}.jpg"
+    filters = "scale=480:270:force_original_aspect_ratio=increase,crop=480:270"
+    for seek in ("1", "0"):
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-ss", seek, "-i", str(source_path),
+                    "-vf", filters, "-frames:v", "1", "-q:v", "4", str(thumb_path),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode == 0 and thumb_path.is_file() and thumb_path.stat().st_size > 0:
+            return {"thumbnail_url": public_download_url(thumb_path), "thumbnail_filename": thumb_path.name}
+    return None
 
 
 def save_image_asset(image_bytes: bytes, mime_type: str, settings: dict[str, Any]) -> dict[str, Any]:
@@ -301,21 +504,24 @@ def save_image_asset(image_bytes: bytes, mime_type: str, settings: dict[str, Any
     suffix = choose_image_suffix(mime_type)
     file_path = DOWNLOAD_DIR / f"image_{asset_id}{suffix}"
     file_path.write_bytes(image_bytes)
+    thumbnail = save_image_thumbnail(file_path, asset_id) or {}
     model = str(settings.get("model") or "")
     meta = f"{settings.get('image_size')} · {settings.get('aspect_ratio')}"
     if image_runner.is_openai_image_model(model):
         meta = f"{meta} · {settings.get('quality') or image_runner.DEFAULT_OPENAI_QUALITY}"
-    return register_asset({
+    return {
         "id": asset_id,
         "type": "image",
         "status": "completed",
         "url": public_download_url(file_path),
         "filename": file_path.name,
+        "thumbnail_url": thumbnail.get("thumbnail_url"),
+        "thumbnail_filename": thumbnail.get("thumbnail_filename"),
         "model": model,
         "prompt": str(settings.get("prompt") or ""),
         "meta": meta,
         "createdAt": now_label(),
-    })
+    }
 
 
 def save_video_asset(media_url: str, settings: dict[str, Any]) -> dict[str, Any]:
@@ -330,18 +536,21 @@ def save_video_asset(media_url: str, settings: dict[str, Any]) -> dict[str, Any]
     suffix = video_runner.choose_suffix(str(response.headers.get("content-type") or ""), media_url)
     file_path = DOWNLOAD_DIR / f"video_{asset_id}{suffix}"
     file_path.write_bytes(response.content)
-    return register_asset({
+    thumbnail = save_video_thumbnail(file_path, asset_id) or {}
+    return {
         "id": asset_id,
         "type": "video",
         "status": "completed",
         "url": public_download_url(file_path),
         "remote_url": media_url,
         "filename": file_path.name,
+        "thumbnail_url": thumbnail.get("thumbnail_url"),
+        "thumbnail_filename": thumbnail.get("thumbnail_filename"),
         "model": str(settings.get("model") or ""),
         "prompt": str(settings.get("prompt") or ""),
         "meta": f"{settings.get('duration')}s · {settings.get('aspect_ratio')}",
         "createdAt": now_label(),
-    })
+    }
 
 @app.get("/")
 def read_root():
@@ -421,39 +630,50 @@ async def save_config(request: Request):
     return {"status": "ok"}
 
 
-@app.get("/api/assets")
-def list_assets():
-    with manifest_lock:
-        assets = read_manifest()
-    existing = []
-    for item in assets:
-        filename = str(item.get("filename") or "")
-        if filename and (DOWNLOAD_DIR / filename).is_file():
-            existing.append(item)
-    return {"assets": existing}
+@app.get("/api/tasks")
+def list_tasks():
+    return {"tasks": db_list_tasks()}
 
 
 def run_image_task(internal_task_id: str, settings: dict):
-    tasks_store[internal_task_id]["status"] = "running"
-    tasks_store[internal_task_id]["logs"].append("图片请求已开始。")
+    store = tasks_store[internal_task_id]
+    store["status"] = "running"
+    store["logs"].append("图片请求已开始。")
+    db_mark_started(internal_task_id, store)
 
     try:
         payload = image_runner.build_payload(settings)
-        tasks_store[internal_task_id]["logs"].append("图片请求参数已构建。")
+        store["request_payload"] = payload
+        db_update_task(internal_task_id, request_payload=payload)
+        store["logs"].append("图片请求参数已构建。")
+        db_update_task(internal_task_id, logs=store["logs"])
         data = image_runner.create_image(settings, payload)
-        tasks_store[internal_task_id]["logs"].append("已收到图片响应。")
+        store["logs"].append("已收到图片响应。")
+        db_update_task(internal_task_id, logs=store["logs"])
         image_bytes, mime_type = image_runner.extract_inline_image(data, proxies=settings.get("proxies"))
         asset = save_image_asset(image_bytes, mime_type, settings)
-        tasks_store[internal_task_id]["logs"].append(f"已保存到 downloads/{asset['filename']}。")
+        store["logs"].append(f"已保存到 downloads/{asset['filename']}。")
 
-        tasks_store[internal_task_id]["status"] = "completed"
-        tasks_store[internal_task_id]["image_url"] = asset["url"]
-        tasks_store[internal_task_id]["asset"] = asset
-        tasks_store[internal_task_id]["raw"] = data
+        store["status"] = "completed"
+        store["image_url"] = asset["url"]
+        store["asset"] = asset
+        store["thumbnail_url"] = asset.get("thumbnail_url")
+        store["raw"] = data
+        db_update_task(
+            internal_task_id,
+            local_url=asset["url"],
+            filename=asset["filename"],
+            thumbnail_url=asset.get("thumbnail_url"),
+            thumbnail_filename=asset.get("thumbnail_filename"),
+            raw=data,
+            logs=store["logs"],
+        )
+        db_mark_finished(internal_task_id, store, "completed")
     except Exception as e:
-        tasks_store[internal_task_id]["status"] = "error"
-        tasks_store[internal_task_id]["error"] = str(e)
-        tasks_store[internal_task_id]["logs"].append(f"错误：{str(e)}")
+        store["status"] = "error"
+        store["error"] = str(e)
+        store["logs"].append(f"错误：{str(e)}")
+        db_mark_finished(internal_task_id, store, "error")
     finally:
         cleanup_files(list(settings.get("_temp_files") or []))
 
@@ -487,46 +707,67 @@ async def generate_image(request: Request, background_tasks: BackgroundTasks):
         "image_url": None,
         "raw": None,
         "error": None,
+        "request_payload": None,
     }
+    db_create_task(internal_task_id, "image", settings)
 
     background_tasks.add_task(run_image_task, internal_task_id, settings)
     return {"internal_task_id": internal_task_id}
 
 def run_video_task(internal_task_id: str, settings: dict):
-    tasks_store[internal_task_id]["status"] = "running"
-    tasks_store[internal_task_id]["logs"].append("视频请求已开始。")
+    store = tasks_store[internal_task_id]
+    store["status"] = "running"
+    store["logs"].append("视频请求已开始。")
+    db_mark_started(internal_task_id, store)
     
     try:
         payload = video_runner.build_payload(settings)
-        tasks_store[internal_task_id]["request_payload"] = payload
-        tasks_store[internal_task_id]["logs"].append("视频请求参数已构建。")
+        store["request_payload"] = payload
+        store["logs"].append("视频请求参数已构建。")
+        db_update_task(internal_task_id, request_payload=payload, logs=store["logs"])
         create_data = video_runner.create_task(settings, payload)
         api_task_id = video_runner.extract_task_id(create_data)
-        tasks_store[internal_task_id]["api_task_id"] = api_task_id
-        tasks_store[internal_task_id]["logs"].append(f"远程任务 ID：{api_task_id}")
+        store["api_task_id"] = api_task_id
+        store["logs"].append(f"远程任务 ID：{api_task_id}")
+        db_update_task(internal_task_id, remote_task_id=api_task_id, logs=store["logs"])
         
         result = video_runner.poll_task(settings, api_task_id)
         status = str(result.get("status") or "").strip().lower()
         
         if status != "completed":
-            tasks_store[internal_task_id]["status"] = "failed"
-            tasks_store[internal_task_id]["raw"] = result
+            store["status"] = "failed"
+            store["raw"] = result
+            db_mark_finished(internal_task_id, store, "failed")
             return
-            
+             
         media_url = video_runner.resolve_media_url(result)
-        tasks_store[internal_task_id]["logs"].append("正在下载视频到本地。")
+        store["logs"].append("正在下载视频到本地。")
+        db_update_task(internal_task_id, logs=store["logs"])
         asset = save_video_asset(media_url, settings)
-        tasks_store[internal_task_id]["logs"].append(f"已保存到 downloads/{asset['filename']}。")
-        tasks_store[internal_task_id]["status"] = "completed"
-        tasks_store[internal_task_id]["media_url"] = asset["url"]
-        tasks_store[internal_task_id]["remote_url"] = media_url
-        tasks_store[internal_task_id]["asset"] = asset
-        tasks_store[internal_task_id]["raw"] = result
+        store["logs"].append(f"已保存到 downloads/{asset['filename']}。")
+        store["status"] = "completed"
+        store["media_url"] = asset["url"]
+        store["remote_url"] = media_url
+        store["asset"] = asset
+        store["thumbnail_url"] = asset.get("thumbnail_url")
+        store["raw"] = result
+        db_update_task(
+            internal_task_id,
+            local_url=asset["url"],
+            remote_url=media_url,
+            filename=asset["filename"],
+            thumbnail_url=asset.get("thumbnail_url"),
+            thumbnail_filename=asset.get("thumbnail_filename"),
+            raw=result,
+            logs=store["logs"],
+        )
+        db_mark_finished(internal_task_id, store, "completed")
         
     except Exception as e:
-        tasks_store[internal_task_id]["status"] = "error"
-        tasks_store[internal_task_id]["error"] = str(e)
-        tasks_store[internal_task_id]["logs"].append(f"错误：{str(e)}")
+        store["status"] = "error"
+        store["error"] = str(e)
+        store["logs"].append(f"错误：{str(e)}")
+        db_mark_finished(internal_task_id, store, "error")
     finally:
         cleanup_files(list(settings.get("_temp_files") or []))
 
@@ -573,12 +814,18 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
         "api_task_id": None,
         "request_payload": None
     }
+    db_create_task(internal_task_id, "video", settings)
     
     background_tasks.add_task(run_video_task, internal_task_id, settings)
     return {"internal_task_id": internal_task_id}
 
 @app.get("/api/task/{internal_task_id}")
 async def get_task_status(internal_task_id: str):
+    if internal_task_id in tasks_store:
+        return tasks_store[internal_task_id]
+    task = db_get_task(internal_task_id)
+    if task:
+        return task
     if internal_task_id not in tasks_store:
         return JSONResponse(status_code=404, content={"message": "Task not found"})
     return tasks_store[internal_task_id]

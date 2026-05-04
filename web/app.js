@@ -167,7 +167,7 @@ const app = createApp({
             if (!isAuthenticated.value) return;
             await loadSavedConfig();
             configLoaded.value = true;
-            await loadPersistedAssets();
+            await loadPersistedTasks();
         });
 
         const checkAuth = async () => {
@@ -187,7 +187,7 @@ const app = createApp({
         const initializeAfterLogin = async () => {
             await loadSavedConfig();
             configLoaded.value = true;
-            await loadPersistedAssets();
+            await loadPersistedTasks();
         };
 
         const submitLogin = async () => {
@@ -263,13 +263,18 @@ const app = createApp({
         };
 
 
-        const loadPersistedAssets = async () => {
+        const loadPersistedTasks = async () => {
             try {
-                const res = await fetch('/api/assets');
+                const res = await fetch('/api/tasks');
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.message || '加载历史资产失败');
-                results.value = (data.assets || []).map(item => ({
-                    logs: [`[系统] 已从 downloads/${item.filename} 加载。`],
+                if (!res.ok) throw new Error(data.message || '加载任务失败');
+                results.value = (data.tasks || []).map(item => ({
+                    id: item.id || item.internal_task_id,
+                    taskId: item.taskId || item.internal_task_id || item.id,
+                    url: item.url || item.image_url || item.media_url || item.local_url,
+                    thumbnailUrl: item.thumbnailUrl || item.thumbnail_url || null,
+                    logs: item.logs?.length ? item.logs : [`[系统] 已从数据库加载任务。`],
+                    durationSeconds: item.durationSeconds ?? item.duration_seconds ?? null,
                     ...item,
                 }));
                 currentPage.value = 1;
@@ -277,8 +282,11 @@ const app = createApp({
                     currentResult.value = results.value[0];
                     currentLogs.value = currentResult.value.logs || [];
                 }
+                results.value
+                    .filter(item => (item.status === 'pending' || item.status === 'running') && item.taskId)
+                    .forEach(item => pollTask(item.taskId, item.id));
             } catch (e) {
-                console.error('加载历史资产失败', e);
+                console.error('加载任务失败', e);
             }
         };
 
@@ -433,7 +441,11 @@ const app = createApp({
         };
 
         const formatTaskDuration = (item) => {
-            if (!item || item.status !== 'completed' || !item.startedAtMs || !item.finishedAtMs) return '';
+            if (!item || item.status !== 'completed') return '';
+            if (item.durationSeconds !== null && item.durationSeconds !== undefined) {
+                return `${Number(item.durationSeconds) || 0}s`;
+            }
+            if (!item.startedAtMs || !item.finishedAtMs) return '';
             const seconds = Math.max(0, Math.round((item.finishedAtMs - item.startedAtMs) / 1000));
             return `${seconds}s`;
         };
@@ -605,6 +617,9 @@ const app = createApp({
                         apiTaskId: data.api_task_id || item.apiTaskId,
                         requestPayload: data.request_payload || item.requestPayload,
                         raw: data.raw || item.raw,
+                        thumbnailUrl: data.thumbnailUrl || data.thumbnail_url || data.asset?.thumbnailUrl || data.asset?.thumbnail_url || item.thumbnailUrl,
+                        thumbnail_url: data.thumbnail_url || data.thumbnailUrl || data.asset?.thumbnail_url || data.asset?.thumbnailUrl || item.thumbnail_url,
+                        durationSeconds: data.durationSeconds ?? data.duration_seconds ?? item.durationSeconds,
                     };
 
                     if (data.status === 'completed') {
