@@ -393,13 +393,18 @@
                     <div class="mb-4 flex items-center justify-between gap-4">
                         <div>
                             <h2 class="text-base font-semibold tracking-tight text-white">生成画廊</h2>
-                            <p class="text-xs text-gray-500">共 {{ results.length }} 个结果，第 {{ currentPage }} / {{ totalPages }} 页</p>
+                            <p class="text-xs text-gray-500">共 {{ totalItems }} 个结果，第 {{ currentPage }} / {{ totalPages }} 页</p>
                         </div>
                         <div class="flex items-center gap-2">
-                            <button v-if="results.length" @click="prevPage" :disabled="currentPage <= 1" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
+                            <div class="flex overflow-hidden rounded-lg border border-white/10 bg-white/5">
+                                <button @click="setGalleryFilter('all')" class="px-3 py-2 text-xs font-medium transition hover:bg-white/10" :class="galleryFilter === 'all' ? 'bg-indigo-500/20 text-indigo-100' : 'text-gray-300'">全部</button>
+                                <button @click="setGalleryFilter('image')" class="px-3 py-2 text-xs font-medium transition hover:bg-white/10" :class="galleryFilter === 'image' ? 'bg-indigo-500/20 text-indigo-100' : 'text-gray-300'">▧ 图片</button>
+                                <button @click="setGalleryFilter('video')" class="px-3 py-2 text-xs font-medium transition hover:bg-white/10" :class="galleryFilter === 'video' ? 'bg-indigo-500/20 text-indigo-100' : 'text-gray-300'">▶ 视频</button>
+                            </div>
+                            <button v-if="totalItems" @click="prevPage" :disabled="currentPage <= 1" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
                                 上一页
                             </button>
-                            <button v-if="results.length" @click="nextPage" :disabled="currentPage >= totalPages" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
+                            <button v-if="totalItems" @click="nextPage" :disabled="currentPage >= totalPages" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
                                 下一页
                             </button>
                             <button @click="refreshTaskList" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white">
@@ -553,6 +558,6 @@
         @keyframes shimmer { 100% { transform: translateX(100%); } }
         @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
-    <script src="/static/app.js?v=20260504-refresh-tasks"></script>
+    <script src="/static/app.js?v=20260504-server-pagination-filter"></script>
 </body>
 </html>

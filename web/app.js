@@ -65,6 +65,9 @@ const app = createApp({
         const isAuthenticated = ref(false);
         const authMessage = ref('');
         const currentPage = ref(1);
+        const totalItems = ref(0);
+        const totalPages = ref(1);
+        const galleryFilter = ref('all');
         const pageSize = 25;
         let saveConfigTimer = null;
         const activePolls = new Map();
@@ -74,11 +77,7 @@ const app = createApp({
         const isLoading = computed(() =>
             results.value.some(item => item.status === 'starting' || item.status === 'running')
         );
-        const totalPages = computed(() => Math.max(1, Math.ceil(results.value.length / pageSize)));
-        const paginatedResults = computed(() => {
-            const start = (currentPage.value - 1) * pageSize;
-            return results.value.slice(start, start + pageSize);
-        });
+        const paginatedResults = computed(() => results.value);
 
         const countReferenceUrls = (value) => String(value || '')
             .split('\n')
@@ -266,9 +265,14 @@ const app = createApp({
         };
 
 
-        const loadPersistedTasks = async () => {
+        const loadPersistedTasks = async (page = currentPage.value) => {
             try {
-                const res = await fetch('/api/tasks');
+                const params = new URLSearchParams({
+                    page: String(page),
+                    page_size: String(pageSize),
+                    type: galleryFilter.value,
+                });
+                const res = await fetch(`/api/tasks?${params.toString()}`);
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.message || '加载任务失败');
                 results.value = (data.tasks || []).map(item => ({
@@ -280,10 +284,15 @@ const app = createApp({
                     durationSeconds: item.durationSeconds ?? item.duration_seconds ?? null,
                     ...item,
                 }));
-                currentPage.value = 1;
+                currentPage.value = data.page || page;
+                totalItems.value = data.total || 0;
+                totalPages.value = data.total_pages || 1;
                 if (results.value.length) {
                     currentResult.value = results.value[0];
                     currentLogs.value = currentResult.value.logs || [];
+                } else {
+                    currentResult.value = null;
+                    currentLogs.value = [];
                 }
                 results.value
                     .filter(item => (item.status === 'pending' || item.status === 'running') && item.taskId)
@@ -294,7 +303,13 @@ const app = createApp({
         };
 
         const refreshTaskList = async () => {
-            await loadPersistedTasks();
+            await loadPersistedTasks(currentPage.value);
+        };
+
+        const setGalleryFilter = async (filter) => {
+            galleryFilter.value = filter;
+            currentPage.value = 1;
+            await loadPersistedTasks(1);
         };
 
         watch([config, image, video], () => {
@@ -470,12 +485,14 @@ const app = createApp({
             showLogs.value = false;
         };
 
-        const nextPage = () => {
-            currentPage.value = Math.min(totalPages.value, currentPage.value + 1);
+        const nextPage = async () => {
+            const next = Math.min(totalPages.value, currentPage.value + 1);
+            if (next !== currentPage.value) await loadPersistedTasks(next);
         };
 
-        const prevPage = () => {
-            currentPage.value = Math.max(1, currentPage.value - 1);
+        const prevPage = async () => {
+            const prev = Math.max(1, currentPage.value - 1);
+            if (prev !== currentPage.value) await loadPersistedTasks(prev);
         };
 
         const runImageTask = async () => {
@@ -516,6 +533,9 @@ const app = createApp({
                     logs: [...placeholder.logs, `[系统] 后端已接收任务：${data.internal_task_id}。`],
                 });
                 pollTask(data.internal_task_id, placeholder.id);
+                if (galleryFilter.value !== 'all' && galleryFilter.value !== 'image') {
+                    await loadPersistedTasks(currentPage.value);
+                }
             } catch (err) {
                 updateResult(placeholder.id, {
                     status: 'error',
@@ -583,6 +603,9 @@ const app = createApp({
                     logs: [...placeholder.logs, `[系统] 后端已接收任务：${data.internal_task_id}。`],
                 });
                 pollTask(data.internal_task_id, placeholder.id);
+                if (galleryFilter.value !== 'all' && galleryFilter.value !== 'video') {
+                    await loadPersistedTasks(currentPage.value);
+                }
             } catch (err) {
                 updateResult(placeholder.id, {
                     status: 'error',
@@ -666,8 +689,8 @@ const app = createApp({
             imageFiles, videoFiles, imageReferenceCount, videoReferenceCount,
             onImageFilesChange, onVideoFilesChange,
             onResultDragStart, onReferenceDrop,
-            results, paginatedResults, currentPage, totalPages, selectedResult, showLogs,
-            openPreview, closePreview, toggleLogs, closeLogs, refreshTaskList,
+            results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, showLogs,
+            openPreview, closePreview, toggleLogs, closeLogs, refreshTaskList, setGalleryFilter,
             submitLogin, logout, updateAuth,
             nextPage, prevPage,
             submitTask,

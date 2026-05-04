@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, Any
 from urllib.parse import urlparse, unquote
 
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks, Query
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import requests
@@ -385,11 +385,11 @@ def db_mark_finished(task_id: str, store: dict[str, Any], status: str) -> None:
     )
 
 
-def db_task_to_client(row: sqlite3.Row) -> dict[str, Any]:
+def db_task_to_client(row: sqlite3.Row, include_detail: bool = True) -> dict[str, Any]:
     status = str(row["status"] or "")
     local_url = row["local_url"]
     thumbnail_url = row["thumbnail_url"]
-    return {
+    task = {
         "id": row["id"],
         "taskId": row["id"],
         "internal_task_id": row["id"],
@@ -418,16 +418,19 @@ def db_task_to_client(row: sqlite3.Row) -> dict[str, Any]:
         "remote_url": row["remote_url"],
         "filename": row["filename"],
         "thumbnail_filename": row["thumbnail_filename"],
-        "logs": json_loads(row["logs"], []),
+        "logs": json_loads(row["logs"], []) if include_detail else [],
         "error": row["error"],
-        "raw": json_loads(row["raw"], None),
-        "request_payload": json_loads(row["request_payload"], None),
-        "requestPayload": json_loads(row["request_payload"], None),
         "createdAt": row["created_at"],
         "startedAt": row["started_at"],
         "finishedAt": row["finished_at"],
         "durationSeconds": row["duration_seconds"],
     }
+    if include_detail:
+        request_payload = json_loads(row["request_payload"], None)
+        task["raw"] = json_loads(row["raw"], None)
+        task["request_payload"] = request_payload
+        task["requestPayload"] = request_payload
+    return task
 
 
 def db_get_task(task_id: str) -> dict[str, Any] | None:
@@ -437,14 +440,32 @@ def db_get_task(task_id: str) -> dict[str, Any] | None:
     return db_task_to_client(row) if row else None
 
 
-def db_list_tasks(limit: int = 200) -> list[dict[str, Any]]:
+def db_list_tasks(page: int = 1, page_size: int = 25, task_type: str = "all") -> dict[str, Any]:
+    page = max(1, int(page or 1))
+    page_size = min(100, max(1, int(page_size or 25)))
+    offset = (page - 1) * page_size
+    task_type = str(task_type or "all").strip().lower()
+    where = ""
+    params: list[Any] = []
+    if task_type in {"image", "video"}:
+        where = "WHERE type = ?"
+        params.append(task_type)
     with sqlite3.connect(CONFIG_DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
+        total = int(conn.execute(f"SELECT COUNT(*) FROM media_tasks {where}", params).fetchone()[0])
         rows = conn.execute(
-            "SELECT * FROM media_tasks ORDER BY created_at DESC LIMIT ?",
-            (limit,),
+            f"SELECT * FROM media_tasks {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (*params, page_size, offset),
         ).fetchall()
-    return [db_task_to_client(row) for row in rows]
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    return {
+        "tasks": [db_task_to_client(row, include_detail=False) for row in rows],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+        "type": task_type if task_type in {"image", "video"} else "all",
+    }
 
 
 def choose_image_suffix(mime_type: str) -> str:
@@ -631,8 +652,12 @@ async def save_config(request: Request):
 
 
 @app.get("/api/tasks")
-def list_tasks():
-    return {"tasks": db_list_tasks()}
+def list_tasks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    type: str = Query("all"),
+):
+    return db_list_tasks(page, page_size, type)
 
 
 def run_image_task(internal_task_id: str, settings: dict):
