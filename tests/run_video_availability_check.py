@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--reference-field",
-        choices=["image_urls", "input_reference"],
+        choices=["image_urls"],
         help="Request field used for reference images",
     )
     parser.add_argument(
@@ -173,7 +173,7 @@ def build_settings(args: argparse.Namespace) -> dict[str, Any]:
         "resolution": None,
         "image_url": [],
         "image_file": [],
-        "reference_field": "input_reference",
+        "reference_field": "image_urls",
         "reference_format": "array",
         "extra_field": [],
         "timeout": DEFAULT_TIMEOUT_SECONDS,
@@ -281,14 +281,7 @@ def build_payload(settings: dict[str, Any]) -> dict[str, Any]:
 
     references = resolve_reference_images(settings)
     if references:
-        if settings["reference_format"] == "string":
-            if len(references) != 1:
-                raise RuntimeError(
-                    "reference_format=string requires exactly one reference image"
-                )
-            payload[settings["reference_field"]] = references[0]
-        else:
-            payload[settings["reference_field"]] = references
+        payload["image_urls"] = references
 
     payload.update(parse_extra_fields(settings["extra_field"]))
     return payload
@@ -303,8 +296,15 @@ def request_json(
         data = response.json()
     except ValueError:
         snippet = response.text[:500]
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"upstream {method} {url} failed with {response.status_code}: {snippet}"
+            )
         raise RuntimeError(f"non-JSON response from {url}: {snippet}")
-    response.raise_for_status()
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"upstream {method} {url} failed with {response.status_code}: {pretty(data)}"
+        )
     if not isinstance(data, dict):
         raise RuntimeError(f"expected JSON object from {url}")
     return response, data

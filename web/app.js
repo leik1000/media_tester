@@ -319,10 +319,19 @@ const app = createApp({
         const openPreview = (item) => {
             currentResult.value = item;
             currentLogs.value = item.logs || [];
-            if (item.status === 'completed' && item.url) {
+            if ((item.status === 'completed' && item.url) || item.status === 'error' || item.status === 'failed') {
                 selectedResult.value = item;
             }
             scrollLogs();
+        };
+
+        const formatJson = (value) => {
+            if (!value) return '';
+            try {
+                return JSON.stringify(value, null, 2);
+            } catch (_) {
+                return String(value);
+            }
         };
 
         const closePreview = () => {
@@ -489,6 +498,9 @@ const app = createApp({
                         status: data.status || item.status,
                         logs,
                         error: data.error || item.error,
+                        apiTaskId: data.api_task_id || item.apiTaskId,
+                        requestPayload: data.request_payload || item.requestPayload,
+                        raw: data.raw || item.raw,
                     };
 
                     if (data.status === 'completed') {
@@ -531,7 +543,7 @@ const app = createApp({
             openPreview, closePreview, toggleLogs, closeLogs, clearResults,
             nextPage, prevPage,
             submitTask,
-            currentLogs, currentResult
+            currentLogs, currentResult, formatJson
         };
     }
 });

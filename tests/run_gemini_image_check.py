@@ -67,6 +67,25 @@ def pretty(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def response_json_or_error(response: requests.Response, url: str, method: str) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except ValueError:
+        snippet = response.text[:500]
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"upstream {method} {url} failed with {response.status_code}: {snippet}"
+            )
+        raise RuntimeError(f"non-JSON response from {url}: {snippet}")
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"upstream {method} {url} failed with {response.status_code}: {pretty(data)}"
+        )
+    if not isinstance(data, dict):
+        raise RuntimeError("expected JSON object response")
+    return data
+
+
 def local_file_to_inline_part(file_path: str) -> dict[str, Any]:
     path = Path(file_path)
     if not path.is_file():
@@ -178,11 +197,7 @@ def create_image(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str,
         proxies=settings.get("proxies"),
     )
     print(f"[POST] {url} -> {response.status_code}")
-    data = response.json()
-    response.raise_for_status()
-    if not isinstance(data, dict):
-        raise RuntimeError("expected JSON object response")
-    return data
+    return response_json_or_error(response, url, "POST")
 
 
 def create_openai_image(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -215,11 +230,7 @@ def create_openai_image(settings: dict[str, Any], payload: dict[str, Any]) -> di
         proxies=proxies,
     )
     print(f"[POST] {url} -> {response.status_code}")
-    data = response.json()
-    response.raise_for_status()
-    if not isinstance(data, dict):
-        raise RuntimeError("expected JSON object response")
-    return data
+    return response_json_or_error(response, url, "POST")
 
 
 def create_openai_image_edit(
@@ -274,11 +285,7 @@ def create_openai_image_edit(
             proxies=proxies,
         )
         print(f"[POST] {url} -> {response.status_code}")
-        result = response.json()
-        response.raise_for_status()
-        if not isinstance(result, dict):
-            raise RuntimeError("expected JSON object response")
-        return result
+        return response_json_or_error(response, url, "POST")
     finally:
         for handle in handles:
             handle.close()

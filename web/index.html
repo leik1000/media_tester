@@ -424,14 +424,39 @@
                                 </button>
                             </div>
                             <div class="flex-1 overflow-auto p-5">
-                                <img v-if="selectedResult.type === 'image'" :src="selectedResult.url" class="mx-auto max-h-[68vh] max-w-full rounded-2xl border border-white/10 object-contain shadow-2xl">
+                                <div v-if="selectedResult.status === 'error' || selectedResult.status === 'failed'" class="space-y-4">
+                                    <div class="rounded-2xl border border-red-400/20 bg-red-950/30 p-4 text-red-100">
+                                        <p class="mb-2 text-sm font-semibold text-red-200">任务报错</p>
+                                        <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{{ selectedResult.error || '任务失败，但没有返回错误详情。' }}</pre>
+                                    </div>
+                                    <div class="grid gap-4 lg:grid-cols-2">
+                                        <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                                            <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">任务信息</p>
+                                            <div class="space-y-1.5 text-xs text-gray-300">
+                                                <p>本地任务：{{ selectedResult.taskId || selectedResult.id }}</p>
+                                                <p v-if="selectedResult.apiTaskId">远程任务：{{ selectedResult.apiTaskId }}</p>
+                                                <p>状态：{{ selectedResult.status }}</p>
+                                                <p>模型：{{ selectedResult.model }}</p>
+                                            </div>
+                                        </div>
+                                        <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                                            <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">请求 Payload</p>
+                                            <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-gray-300">{{ formatJson(selectedResult.requestPayload) || '无 payload 记录。' }}</pre>
+                                        </div>
+                                    </div>
+                                    <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                                        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">日志</p>
+                                        <pre class="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-gray-300">{{ (selectedResult.logs || []).join('\n') || '无日志。' }}</pre>
+                                    </div>
+                                </div>
+                                <img v-else-if="selectedResult.type === 'image'" :src="selectedResult.url" class="mx-auto max-h-[68vh] max-w-full rounded-2xl border border-white/10 object-contain shadow-2xl">
                                 <video v-else controls autoplay class="mx-auto max-h-[68vh] w-full rounded-2xl border border-white/10 bg-black shadow-2xl">
                                     <source :src="selectedResult.url" type="video/mp4">
                                 </video>
                             </div>
                             <div class="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-5 py-4">
                                 <p class="line-clamp-2 max-w-3xl text-sm text-gray-400">{{ selectedResult.prompt }}</p>
-                                <div class="flex gap-2">
+                                <div v-if="selectedResult.status === 'completed' && selectedResult.url" class="flex gap-2">
                                     <a v-if="selectedResult.type === 'image'" :href="selectedResult.url" download="generated_image.png" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">下载</a>
                                     <a v-else :href="selectedResult.url" target="_blank" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">打开链接</a>
                                 </div>

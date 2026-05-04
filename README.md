@@ -32,8 +32,8 @@ Files:
 
 - `app.py`: FastAPI Web Server
 - `web/`: Web Frontend (HTML/JS/Tailwind)
-- `run_video_availability_check.py`: video test logic
-- `run_gemini_image_check.py`: image test logic. Gemini models use `generateContent`; `gpt-image-2` uses official `/v1/images/generations` and `/v1/images/edits` endpoints.
+- `tests/run_video_availability_check.py`: video test logic
+- `tests/run_gemini_image_check.py`: image test logic. Gemini models use `generateContent`; `gpt-image-2` uses official `/v1/images/generations` and `/v1/images/edits` endpoints.
 
 Notes:
 

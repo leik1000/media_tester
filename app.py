@@ -14,8 +14,8 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import requests
 
-import run_gemini_image_check as image_runner
-import run_video_availability_check as video_runner
+from tests import run_gemini_image_check as image_runner
+from tests import run_video_availability_check as video_runner
 
 app = FastAPI()
 
@@ -328,6 +328,7 @@ def run_video_task(internal_task_id: str, settings: dict):
     
     try:
         payload = video_runner.build_payload(settings)
+        tasks_store[internal_task_id]["request_payload"] = payload
         tasks_store[internal_task_id]["logs"].append("视频请求参数已构建。")
         create_data = video_runner.create_task(settings, payload)
         api_task_id = video_runner.extract_task_id(create_data)
@@ -388,7 +389,7 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
     settings["poll_interval"] = 10.0
     settings["timeout"] = 600
     settings["reference_format"] = "array"
-    settings["reference_field"] = "input_reference"
+    settings["reference_field"] = "image_urls"
     settings["extra_field"] = []
 
     internal_task_id = str(uuid.uuid4())
@@ -399,7 +400,8 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
         "media_url": None,
         "raw": None,
         "error": None,
-        "api_task_id": None
+        "api_task_id": None,
+        "request_payload": None
     }
     
     background_tasks.add_task(run_video_task, internal_task_id, settings)
