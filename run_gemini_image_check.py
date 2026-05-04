@@ -3,6 +3,7 @@ import base64
 import json
 import mimetypes
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -23,28 +24,43 @@ MODEL_OPTIONS = [
     "gemini-3.1-flash-image-preview",
     "gpt-image-2",
 ]
-ASPECT_RATIO_OPTIONS = ["1:1", "4:3", "3:4", "16:9", "9:16"]
+ASPECT_RATIO_OPTIONS = ["1:1", "4:3", "3:4", "5:4", "4:5", "3:2", "2:3", "16:9", "9:16", "21:9"]
 IMAGE_SIZE_OPTIONS = ["1K", "2K", "4K"]
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run Gemini image test and decode inline base64 image response"
-    )
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--api-key", default=os.getenv("VIDEO_TEST_API_KEY", ""))
-    parser.add_argument("--model", default=DEFAULT_MODEL, choices=MODEL_OPTIONS)
-    parser.add_argument("--prompt", default=DEFAULT_PROMPT)
-    parser.add_argument("--aspect-ratio", default=DEFAULT_ASPECT_RATIO)
-    parser.add_argument("--image-size", default=DEFAULT_IMAGE_SIZE)
-    parser.add_argument("--image-url", action="append", default=None)
-    parser.add_argument("--image-file", action="append", default=None)
-    parser.add_argument("--request-timeout", type=int, default=DEFAULT_REQUEST_TIMEOUT)
-    parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
-    parser.add_argument("--output-name", default=DEFAULT_OUTPUT_NAME)
-    parser.add_argument("--save-image", action="store_true")
-    parser.add_argument("--print-payload", action="store_true")
-    return parser.parse_args()
+OPENAI_IMAGE_MODELS = {"gpt-image-2"}
+OPENAI_QUALITY_OPTIONS = ["low", "medium", "high"]
+DEFAULT_OPENAI_QUALITY = "medium"
+OPENAI_IMAGE_SIZE_MAP = {
+    ("1K", "1:1"): "1024x1024",
+    ("1K", "4:3"): "1216x912",
+    ("1K", "3:4"): "912x1216",
+    ("1K", "5:4"): "1200x960",
+    ("1K", "4:5"): "960x1200",
+    ("1K", "3:2"): "1296x864",
+    ("1K", "2:3"): "864x1296",
+    ("1K", "16:9"): "1536x864",
+    ("1K", "9:16"): "864x1536",
+    ("1K", "21:9"): "1568x672",
+    ("2K", "1:1"): "2048x2048",
+    ("2K", "4:3"): "2048x1536",
+    ("2K", "3:4"): "1536x2048",
+    ("2K", "5:4"): "1920x1536",
+    ("2K", "4:5"): "1536x1920",
+    ("2K", "3:2"): "1920x1280",
+    ("2K", "2:3"): "1280x1920",
+    ("2K", "16:9"): "2048x1152",
+    ("2K", "9:16"): "1152x2048",
+    ("2K", "21:9"): "2016x864",
+    ("4K", "1:1"): "3840x3840",
+    ("4K", "4:3"): "3840x2880",
+    ("4K", "3:4"): "2880x3840",
+    ("4K", "5:4"): "3840x3072",
+    ("4K", "4:5"): "3072x3840",
+    ("4K", "3:2"): "3840x2560",
+    ("4K", "2:3"): "2560x3840",
+    ("4K", "16:9"): "3840x2160",
+    ("4K", "9:16"): "2160x3840",
+    ("4K", "21:9"): "3584x1536",
+}
 
 
 def pretty(data: Any) -> str:
@@ -97,7 +113,37 @@ def build_headers(api_key: str) -> dict[str, str]:
     return headers
 
 
+def is_openai_image_model(model: str) -> bool:
+    return str(model or "").strip() in OPENAI_IMAGE_MODELS
+
+
+def openai_image_size(image_size: str, aspect_ratio: str) -> str:
+    size = str(image_size or DEFAULT_IMAGE_SIZE).strip().upper()
+    ratio = str(aspect_ratio or DEFAULT_ASPECT_RATIO).strip()
+    if "x" in size.lower():
+        return size.lower()
+    return OPENAI_IMAGE_SIZE_MAP.get((size, ratio), OPENAI_IMAGE_SIZE_MAP[("2K", "16:9")])
+
+
 def build_payload(settings: dict[str, Any]) -> dict[str, Any]:
+    if is_openai_image_model(str(settings.get("model") or "")):
+        payload = {
+            "model": settings["model"],
+            "prompt": settings["prompt"],
+            "size": openai_image_size(
+                str(settings.get("image_size") or ""),
+                str(settings.get("aspect_ratio") or ""),
+            ),
+            "n": 1,
+        }
+        quality = str(settings.get("quality") or DEFAULT_OPENAI_QUALITY).strip()
+        if quality in OPENAI_QUALITY_OPTIONS:
+            payload["quality"] = quality
+        if settings.get("image_url") or settings.get("image_file"):
+            payload["image_url"] = list(settings.get("image_url") or [])
+            payload["image_file"] = list(settings.get("image_file") or [])
+        return payload
+
     parts: list[dict[str, Any]] = [{"text": settings["prompt"]}]
     for item in settings.get("image_url") or []:
         value = str(item).strip()
@@ -119,6 +165,9 @@ def build_payload(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_image(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    if is_openai_image_model(str(settings.get("model") or "")):
+        return create_openai_image(settings, payload)
+
     base_url = str(settings["base_url"] or DEFAULT_BASE_URL).rstrip("/")
     url = f"{base_url}/v1beta/models/{settings['model']}:generateContent"
     response = requests.post(
@@ -126,6 +175,7 @@ def create_image(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str,
         headers=build_headers(str(settings.get("api_key") or "")),
         json=payload,
         timeout=int(settings["request_timeout"]),
+        proxies=settings.get("proxies"),
     )
     print(f"[POST] {url} -> {response.status_code}")
     data = response.json()
@@ -135,7 +185,126 @@ def create_image(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str,
     return data
 
 
-def extract_inline_image(data: dict[str, Any]) -> tuple[bytes, str]:
+def create_openai_image(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    base_url = str(settings["base_url"] or DEFAULT_BASE_URL).rstrip("/")
+    api_key = str(settings.get("api_key") or "")
+    timeout = int(settings["request_timeout"])
+    proxies = settings.get("proxies")
+    image_files = list(payload.get("image_file") or [])
+    image_urls = [str(item).strip() for item in payload.get("image_url") or [] if str(item).strip()]
+
+    if image_files or image_urls:
+        return create_openai_image_edit(
+            base_url, api_key, payload, image_files, image_urls, timeout, proxies
+        )
+
+    url = f"{base_url}/v1/images/generations"
+    request_payload = {
+        "model": payload["model"],
+        "prompt": payload["prompt"],
+        "size": payload["size"],
+        "n": payload.get("n", 1),
+    }
+    if payload.get("quality"):
+        request_payload["quality"] = payload["quality"]
+    response = requests.post(
+        url,
+        headers=build_headers(api_key),
+        json=request_payload,
+        timeout=timeout,
+        proxies=proxies,
+    )
+    print(f"[POST] {url} -> {response.status_code}")
+    data = response.json()
+    response.raise_for_status()
+    if not isinstance(data, dict):
+        raise RuntimeError("expected JSON object response")
+    return data
+
+
+def create_openai_image_edit(
+    base_url: str,
+    api_key: str,
+    payload: dict[str, Any],
+    image_files: list[str],
+    image_urls: list[str],
+    timeout: int,
+    proxies: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    url = f"{base_url}/v1/images/edits"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    data = {
+        "model": payload["model"],
+        "prompt": payload["prompt"],
+        "size": payload["size"],
+        "n": str(payload.get("n", 1)),
+    }
+    if payload.get("quality"):
+        data["quality"] = payload["quality"]
+    handles = []
+    temp_paths = []
+
+    try:
+        for image_url in image_urls:
+            response = requests.get(image_url, timeout=timeout, proxies=proxies)
+            response.raise_for_status()
+            suffix = Path(urlparse(image_url).path or "").suffix or ".png"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(response.content)
+            tmp.close()
+            temp_paths.append(tmp.name)
+            image_files.append(tmp.name)
+
+        files = []
+        for file_path in image_files:
+            path = Path(file_path)
+            if not path.is_file():
+                raise RuntimeError(f"image file not found: {path}")
+            mime_type = mimetypes.guess_type(path.name)[0] or "image/png"
+            handle = path.open("rb")
+            handles.append(handle)
+            files.append(("image", (path.name, handle, mime_type)))
+
+        response = requests.post(
+            url,
+            headers=headers,
+            data=data,
+            files=files,
+            timeout=timeout,
+            proxies=proxies,
+        )
+        print(f"[POST] {url} -> {response.status_code}")
+        result = response.json()
+        response.raise_for_status()
+        if not isinstance(result, dict):
+            raise RuntimeError("expected JSON object response")
+        return result
+    finally:
+        for handle in handles:
+            handle.close()
+        for temp_path in temp_paths:
+            try:
+                Path(temp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def extract_inline_image(data: dict[str, Any], proxies: dict[str, str] | None = None) -> tuple[bytes, str]:
+    image_data = data.get("data")
+    if isinstance(image_data, list):
+        for item in image_data:
+            if not isinstance(item, dict):
+                continue
+            raw_b64 = str(item.get("b64_json") or "").strip()
+            if raw_b64:
+                return base64.b64decode(raw_b64), "image/png"
+            image_url = str(item.get("url") or "").strip()
+            if image_url:
+                response = requests.get(image_url, timeout=DEFAULT_REQUEST_TIMEOUT, proxies=proxies)
+                response.raise_for_status()
+                mime_type = response.headers.get("Content-Type", "image/png").split(";", 1)[0]
+                return response.content, mime_type or "image/png"
+
     candidates = data.get("candidates") or []
     for candidate in candidates:
         content = candidate.get("content") or {}
@@ -171,40 +340,3 @@ def save_image_bytes(
     file_path.write_bytes(image_bytes)
     return file_path
 
-
-def main() -> int:
-    args = parse_args()
-    settings = {
-        "base_url": args.base_url,
-        "api_key": args.api_key,
-        "model": args.model,
-        "prompt": args.prompt,
-        "aspect_ratio": args.aspect_ratio,
-        "image_size": args.image_size,
-        "image_url": list(args.image_url or []),
-        "image_file": list(args.image_file or []),
-        "request_timeout": args.request_timeout,
-        "out_dir": args.out_dir,
-        "output_name": args.output_name,
-    }
-    try:
-        payload = build_payload(settings)
-        if args.print_payload:
-            print("[payload]")
-            print(pretty(payload))
-        data = create_image(settings, payload)
-        image_bytes, mime_type = extract_inline_image(data)
-        print(f"[result] mime_type={mime_type} bytes={len(image_bytes)}")
-        if args.save_image:
-            path = save_image_bytes(
-                image_bytes, mime_type, args.out_dir, args.output_name
-            )
-            print(f"[result] saved={path}")
-        return 0
-    except Exception as exc:
-        print(str(exc))
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

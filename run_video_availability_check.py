@@ -311,6 +311,7 @@ def create_task(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str, 
         url,
         headers=build_headers(str(settings.get("api_key") or "")),
         timeout=int(settings["request_timeout"]),
+        proxies=settings.get("proxies"),
         json=payload,
     )
     return data
@@ -337,6 +338,7 @@ def poll_task(settings: dict[str, Any], task_id: str) -> dict[str, Any]:
             url,
             headers=headers,
             timeout=int(settings["request_timeout"]),
+            proxies=settings.get("proxies"),
         )
         status = str(data.get("status") or "").strip().lower()
         print(f"[poll #{poll_count}] status={status or 'unknown'}")
@@ -361,9 +363,9 @@ def resolve_media_url(data: dict[str, Any]) -> str:
     raise RuntimeError("completed task did not return a media url")
 
 
-def head_check_media(url: str, timeout: int) -> None:
+def head_check_media(url: str, timeout: int, proxies: dict[str, str] | None = None) -> None:
     try:
-        response = requests.head(url, allow_redirects=True, timeout=timeout)
+        response = requests.head(url, allow_redirects=True, timeout=timeout, proxies=proxies)
         print(f"[HEAD] {url} -> {response.status_code}")
         if response.status_code >= 400:
             raise RuntimeError(f"media HEAD check failed: {response.status_code}")
@@ -384,8 +386,8 @@ def choose_suffix(content_type: str, media_url: str) -> str:
     return ".bin"
 
 
-def download_media(url: str, out_dir: str, output_name: str, timeout: int) -> Path:
-    response = requests.get(url, allow_redirects=True, timeout=timeout)
+def download_media(url: str, out_dir: str, output_name: str, timeout: int, proxies: dict[str, str] | None = None) -> Path:
+    response = requests.get(url, allow_redirects=True, timeout=timeout, proxies=proxies)
     print(f"[DOWNLOAD] {url} -> {response.status_code}")
     response.raise_for_status()
     target_dir = Path(out_dir)
@@ -395,44 +397,3 @@ def download_media(url: str, out_dir: str, output_name: str, timeout: int) -> Pa
     file_path.write_bytes(response.content)
     return file_path
 
-
-def main() -> int:
-    args = parse_args()
-    try:
-        settings = build_settings(args)
-        payload = build_payload(settings)
-        if settings["print_payload"]:
-            print("[payload]")
-            print(pretty(payload))
-
-        create_data = create_task(settings, payload)
-        task_id = extract_task_id(create_data)
-        result = poll_task(settings, task_id)
-        status = str(result.get("status") or "").strip().lower()
-        if status != "completed":
-            print("[result] task failed")
-            return 1
-
-        media_url = resolve_media_url(result)
-        print(f"[result] task_id={task_id}")
-        print(f"[result] media_url={media_url}")
-
-        if not settings["skip_head_check"]:
-            head_check_media(media_url, int(settings["request_timeout"]))
-
-        if settings["download_check"]:
-            file_path = download_media(
-                media_url,
-                str(settings["out_dir"]),
-                str(settings["output_name"]),
-                int(settings["request_timeout"]),
-            )
-            print(f"[result] saved={file_path}")
-        return 0
-    except Exception as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
