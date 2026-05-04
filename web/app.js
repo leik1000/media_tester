@@ -61,6 +61,9 @@ const app = createApp({
         const selectedResult = ref(null);
         const showLogs = ref(false);
         const configLoaded = ref(false);
+        const authChecked = ref(false);
+        const isAuthenticated = ref(false);
+        const authMessage = ref('');
         const currentPage = ref(1);
         const pageSize = 25;
         let saveConfigTimer = null;
@@ -76,6 +79,14 @@ const app = createApp({
             return results.value.slice(start, start + pageSize);
         });
 
+        const countReferenceUrls = (value) => String(value || '')
+            .split('\n')
+            .map(item => item.trim())
+            .filter(Boolean)
+            .length;
+        const imageReferenceCount = computed(() => countReferenceUrls(image.imageUrls) + imageFiles.value.length);
+        const videoReferenceCount = computed(() => countReferenceUrls(video.imageUrls) + videoFiles.value.length);
+
         const config = reactive({
             baseUrl: 'https://api.pixellelabs.com',
             enableProxy: true,
@@ -85,6 +96,17 @@ const app = createApp({
             gemini3ProImageApiKey: '',
             gemini31FlashImageApiKey: '',
             videoApiKey: ''
+        });
+
+        const loginForm = reactive({
+            username: 'admin',
+            password: '',
+        });
+
+        const authSettings = reactive({
+            username: 'admin',
+            newPassword: '',
+            message: '',
         });
 
         const image = reactive({
@@ -140,10 +162,83 @@ const app = createApp({
         };
 
         onMounted(async () => {
+            await checkAuth();
+            authChecked.value = true;
+            if (!isAuthenticated.value) return;
             await loadSavedConfig();
             configLoaded.value = true;
             await loadPersistedAssets();
         });
+
+        const checkAuth = async () => {
+            try {
+                const res = await fetch('/api/auth/status');
+                const data = await res.json();
+                isAuthenticated.value = !!data.authenticated;
+                if (data.username) {
+                    loginForm.username = data.username;
+                    authSettings.username = data.username;
+                }
+            } catch (e) {
+                isAuthenticated.value = false;
+            }
+        };
+
+        const initializeAfterLogin = async () => {
+            await loadSavedConfig();
+            configLoaded.value = true;
+            await loadPersistedAssets();
+        };
+
+        const submitLogin = async () => {
+            authMessage.value = '';
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(loginForm),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || '登录失败');
+                isAuthenticated.value = true;
+                authSettings.username = data.username || loginForm.username;
+                loginForm.password = '';
+                await initializeAfterLogin();
+            } catch (e) {
+                authMessage.value = e.message || '登录失败';
+            }
+        };
+
+        const logout = async () => {
+            await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+            isAuthenticated.value = false;
+            configLoaded.value = false;
+            results.value = [];
+            currentResult.value = null;
+            currentLogs.value = [];
+        };
+
+        const updateAuth = async () => {
+            authSettings.message = '';
+            try {
+                const res = await fetch('/api/auth/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: authSettings.username,
+                        password: authSettings.newPassword,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || '保存登录配置失败');
+                authSettings.username = data.username || authSettings.username;
+                loginForm.username = authSettings.username;
+                authSettings.newPassword = '';
+                authSettings.message = '登录配置已保存。';
+            } catch (e) {
+                authSettings.message = e.message || '保存登录配置失败';
+            }
+        };
 
         const applySavedConfig = (savedData) => {
             Object.assign(config, savedData.config || {});
@@ -188,7 +283,7 @@ const app = createApp({
         };
 
         watch([config, image, video], () => {
-            if (!configLoaded.value) return;
+            if (!configLoaded.value || !isAuthenticated.value) return;
             const payload = JSON.stringify({ config, image, video });
             clearTimeout(saveConfigTimer);
             saveConfigTimer = setTimeout(() => {
@@ -238,7 +333,7 @@ const app = createApp({
 
         const resolveVideoApiKey = () => config.videoApiKey || config.defaultApiKey || '';
 
-        const appendCommonImageFields = (formData, source, apiKey, options = {}) => {
+        const appendCommonTaskFields = (formData, source, apiKey, options = {}) => {
             formData.append('base_url', config.baseUrl);
             formData.append('proxy_url', config.enableProxy ? (config.proxyUrl || '') : '');
             formData.append('api_key', apiKey || '');
@@ -287,6 +382,7 @@ const app = createApp({
         };
 
         const createPlaceholder = (item) => {
+            const startedAtMs = Date.now();
             const result = {
                 id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
                 taskId: null,
@@ -295,6 +391,8 @@ const app = createApp({
                 error: null,
                 logs: [],
                 createdAt: new Date().toLocaleString(),
+                startedAtMs,
+                finishedAtMs: null,
                 ...item,
             };
             results.value.unshift(result);
@@ -334,12 +432,10 @@ const app = createApp({
             }
         };
 
-        const formatCompletionTime = (item) => {
-            if (!item || item.status !== 'completed' || !item.createdAt) return '';
-            const value = String(item.createdAt).trim();
-            const match = value.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})(?::\d{2})?/);
-            if (match) return `${match[2]}-${match[3]} ${match[4]}`;
-            return value;
+        const formatTaskDuration = (item) => {
+            if (!item || item.status !== 'completed' || !item.startedAtMs || !item.finishedAtMs) return '';
+            const seconds = Math.max(0, Math.round((item.finishedAtMs - item.startedAtMs) / 1000));
+            return `${seconds}s`;
         };
 
         const closePreview = () => {
@@ -391,15 +487,8 @@ const app = createApp({
             currentLogs.value = placeholder.logs;
 
             try {
-                if (!usingStartEnd) {
-                    const urlRefCount = video.imageUrls.split('\n').map(s => s.trim()).filter(Boolean).length;
-                    const referenceCount = urlRefCount + videoFiles.value.length;
-                    if (referenceCount > cap.maxRefs) {
-                        throw new Error(`当前模型最多支持 ${cap.maxRefs} 张参考图。`);
-                    }
-                }
                 const payload = new FormData();
-                appendCommonImageFields(payload, image, resolveImageApiKey(image.model));
+                appendCommonTaskFields(payload, image, resolveImageApiKey(image.model));
                 payload.append('image_size', image.size);
                 if (image.model === 'gpt-image-2') {
                     payload.append('quality', image.quality || 'medium');
@@ -449,8 +538,15 @@ const app = createApp({
             currentLogs.value = placeholder.logs;
 
             try {
+                if (!usingStartEnd) {
+                    const urlRefCount = video.imageUrls.split('\n').map(s => s.trim()).filter(Boolean).length;
+                    const referenceCount = urlRefCount + videoFiles.value.length;
+                    if (referenceCount > cap.maxRefs) {
+                        throw new Error(`当前模型最多支持 ${cap.maxRefs} 张参考图。`);
+                    }
+                }
                 const payload = new FormData();
-                appendCommonImageFields(payload, video, resolveVideoApiKey(), { includeReferences: !usingStartEnd });
+                appendCommonTaskFields(payload, video, resolveVideoApiKey(), { includeReferences: !usingStartEnd });
                 payload.append('duration', video.duration);
                 payload.append('resolution', video.resolution);
                 payload.append('create_path', video.createPath);
@@ -518,6 +614,10 @@ const app = createApp({
                         patch.createdAt = data.asset?.createdAt || item.createdAt;
                     }
 
+                    if (data.status === 'completed' || data.status === 'failed' || data.status === 'error') {
+                        patch.finishedAtMs = item.finishedAtMs || Date.now();
+                    }
+
                     updateResult(resultId, patch);
 
                     if (data.status === 'completed' || data.status === 'failed' || data.status === 'error') {
@@ -542,16 +642,18 @@ const app = createApp({
 
         return {
             tab, isLoading, isSubmitting,
+            authChecked, isAuthenticated, loginForm, authMessage, authSettings,
             config, image, video,
             videoModelOptions, currentVideoCapability, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
-            imageFiles, videoFiles,
+            imageFiles, videoFiles, imageReferenceCount, videoReferenceCount,
             onImageFilesChange, onVideoFilesChange,
             onResultDragStart, onReferenceDrop,
             results, paginatedResults, currentPage, totalPages, selectedResult, showLogs,
             openPreview, closePreview, toggleLogs, closeLogs, clearResults,
+            submitLogin, logout, updateAuth,
             nextPage, prevPage,
             submitTask,
-            currentLogs, currentResult, formatJson, formatCompletionTime
+            currentLogs, currentResult, formatJson, formatTaskDuration
         };
     }
 });

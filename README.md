@@ -17,6 +17,13 @@ python -m venv .venv
 ```
 Then open `http://127.0.0.1:5800` in your browser.
 
+Default login:
+
+- Username: `admin`
+- Password: `admin`
+
+Change the login username/password from the left sidebar after signing in.
+
 Docker:
 
 ```bash
@@ -38,4 +45,5 @@ Files:
 Notes:
 
 - Configurations are auto-saved to the server-side SQLite database at `data/config.db`.
+- Change the default login password before exposing the service on a public server.
 - For `gpt-image-2`, leave reference images empty for text-to-image. Add image URLs to test image-to-image via `/v1/images/edits`.

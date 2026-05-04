@@ -1,9 +1,13 @@
 import uuid
 import base64
+import hashlib
+import hmac
 import json
 import mimetypes
+import secrets
 import sqlite3
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
@@ -29,6 +33,8 @@ DOWNLOAD_DIR = Path(__file__).resolve().parent / "downloads"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CONFIG_DB_PATH = DATA_DIR / "config.db"
 MANIFEST_PATH = DOWNLOAD_DIR / "manifest.json"
+SESSION_COOKIE = "media_tester_session"
+SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
 manifest_lock = threading.Lock()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,7 +82,112 @@ def write_saved_config(data: dict[str, Any]) -> None:
         )
 
 
+def read_named_config(name: str) -> dict[str, Any]:
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        row = conn.execute("SELECT value FROM configs WHERE name = ?", (name,)).fetchone()
+    if not row:
+        return {}
+    try:
+        data = json.loads(row[0])
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_named_config(name: str, data: dict[str, Any]) -> None:
+    payload = json.dumps(data, ensure_ascii=False)
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO configs (name, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(name) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (name, payload),
+        )
+
+
+def hash_password(password: str, salt: str) -> str:
+    raw = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000)
+    return raw.hex()
+
+
+def ensure_auth_config() -> dict[str, Any]:
+    auth = read_named_config("auth")
+    if auth.get("username") and auth.get("password_hash") and auth.get("salt"):
+        return auth
+    salt = secrets.token_hex(16)
+    auth = {
+        "username": "admin",
+        "salt": salt,
+        "password_hash": hash_password("admin", salt),
+    }
+    write_named_config("auth", auth)
+    return auth
+
+
+def verify_credentials(username: str, password: str) -> bool:
+    auth = ensure_auth_config()
+    expected_username = str(auth.get("username") or "")
+    salt = str(auth.get("salt") or "")
+    expected_hash = str(auth.get("password_hash") or "")
+    if not expected_username or not salt or not expected_hash:
+        return False
+    candidate_hash = hash_password(password, salt)
+    return hmac.compare_digest(username, expected_username) and hmac.compare_digest(candidate_hash, expected_hash)
+
+
+def session_secret() -> str:
+    auth = ensure_auth_config()
+    secret = str(auth.get("session_secret") or "")
+    if secret:
+        return secret
+    auth["session_secret"] = secrets.token_hex(32)
+    write_named_config("auth", auth)
+    return str(auth["session_secret"])
+
+
+def create_session_token(username: str) -> str:
+    expires_at = int(time.time()) + SESSION_TTL_SECONDS
+    payload = f"{username}:{expires_at}"
+    signature = hmac.new(session_secret().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def valid_session_token(token: str) -> bool:
+    try:
+        username, expires_at_raw, signature = str(token or "").rsplit(":", 2)
+        expires_at = int(expires_at_raw)
+    except (ValueError, TypeError):
+        return False
+    if expires_at < int(time.time()):
+        return False
+    payload = f"{username}:{expires_at}"
+    expected = hmac.new(session_secret().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return False
+    return username == str(ensure_auth_config().get("username") or "")
+
+
+def is_authenticated(request: Request) -> bool:
+    return valid_session_token(request.cookies.get(SESSION_COOKIE, ""))
+
+
 init_config_db()
+ensure_auth_config()
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    path = request.url.path
+    public_paths = {"/", "/api/auth/status", "/api/auth/login"}
+    if path in public_paths or path.startswith("/static/"):
+        return await call_next(request)
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"message": "请先登录"})
+    return await call_next(request)
 
 
 def form_value(form, name: str, default: str = "") -> str:
@@ -235,6 +346,65 @@ def save_video_asset(media_url: str, settings: dict[str, Any]) -> dict[str, Any]
 @app.get("/")
 def read_root():
     return FileResponse("web/index.html")
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    auth = ensure_auth_config()
+    return {
+        "authenticated": is_authenticated(request),
+        "username": str(auth.get("username") or "admin"),
+    }
+
+
+@app.post("/api/auth/login")
+async def login(request: Request):
+    data = await request.json()
+    username = str(data.get("username") or "").strip()
+    password = str(data.get("password") or "")
+    if not verify_credentials(username, password):
+        return JSONResponse(status_code=401, content={"message": "用户名或密码错误"})
+    response = JSONResponse(content={"status": "ok", "username": username})
+    response.set_cookie(
+        SESSION_COOKIE,
+        create_session_token(username),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
+
+
+@app.post("/api/auth/logout")
+def logout():
+    response = JSONResponse(content={"status": "ok"})
+    response.delete_cookie(SESSION_COOKIE)
+    return response
+
+
+@app.post("/api/auth/update")
+async def update_auth(request: Request):
+    data = await request.json()
+    new_username = str(data.get("username") or "").strip()
+    new_password = str(data.get("password") or "")
+    auth = ensure_auth_config()
+    if not new_username:
+        return JSONResponse(status_code=400, content={"message": "用户名不能为空"})
+    auth["username"] = new_username
+    if new_password:
+        auth["salt"] = secrets.token_hex(16)
+        auth["password_hash"] = hash_password(new_password, str(auth["salt"]))
+    auth["session_secret"] = secrets.token_hex(32)
+    write_named_config("auth", auth)
+    response = JSONResponse(content={"status": "ok", "username": new_username})
+    response.set_cookie(
+        SESSION_COOKIE,
+        create_session_token(new_username),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 @app.get("/api/config")
