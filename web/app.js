@@ -8,15 +8,24 @@ const app = createApp({
         const currentResult = ref(null);
         const results = ref([]);
         const selectedResult = ref(null);
+        const showLogs = ref(false);
+        const currentPage = ref(1);
+        const pageSize = 25;
         const imageFiles = ref([]);
         const videoFiles = ref([]);
 
         const isLoading = computed(() =>
             results.value.some(item => item.status === 'starting' || item.status === 'running')
         );
+        const totalPages = computed(() => Math.max(1, Math.ceil(results.value.length / pageSize)));
+        const paginatedResults = computed(() => {
+            const start = (currentPage.value - 1) * pageSize;
+            return results.value.slice(start, start + pageSize);
+        });
 
         const config = reactive({
             baseUrl: 'https://api.pixellelabs.com',
+            enableProxy: true,
             proxyUrl: 'http://127.0.0.1:10808',
             defaultApiKey: '',
             gptImage2ApiKey: '',
@@ -27,7 +36,7 @@ const app = createApp({
 
         const image = reactive({
             model: 'gemini-3-pro-image-preview',
-            prompt: 'A cinematic mountain sunrise with drifting clouds',
+            prompt: '电影感山间日出，云雾缓慢流动',
             aspectRatio: '16:9',
             size: '2K',
             quality: 'medium',
@@ -36,7 +45,7 @@ const app = createApp({
 
         const video = reactive({
             model: 'sora2',
-            prompt: 'A cinematic hummingbird flying through a sunlit garden',
+            prompt: '电影感蜂鸟飞过阳光花园',
             aspectRatio: '16:9',
             duration: 4,
             createPath: '/v1/videos',
@@ -56,7 +65,7 @@ const app = createApp({
                     Object.assign(image, parsed.image || {});
                     Object.assign(video, parsed.video || {});
                 } catch (e) {
-                    console.error('Failed to load config', e);
+                    console.error('加载配置失败', e);
                 }
             }
             await loadPersistedAssets();
@@ -67,17 +76,18 @@ const app = createApp({
             try {
                 const res = await fetch('/api/assets');
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.message || 'Failed to load assets');
+                if (!res.ok) throw new Error(data.message || '加载历史资产失败');
                 results.value = (data.assets || []).map(item => ({
-                    logs: [`[System] Loaded from downloads/${item.filename}.`],
+                    logs: [`[系统] 已从 downloads/${item.filename} 加载。`],
                     ...item,
                 }));
+                currentPage.value = 1;
                 if (results.value.length) {
                     currentResult.value = results.value[0];
                     currentLogs.value = currentResult.value.logs || [];
                 }
             } catch (e) {
-                console.error('Failed to load persisted assets', e);
+                console.error('加载历史资产失败', e);
             }
         };
 
@@ -125,7 +135,7 @@ const app = createApp({
 
         const appendCommonImageFields = (formData, source, apiKey) => {
             formData.append('base_url', config.baseUrl);
-            formData.append('proxy_url', config.proxyUrl || '');
+            formData.append('proxy_url', config.enableProxy ? (config.proxyUrl || '') : '');
             formData.append('api_key', apiKey || '');
             formData.append('model', source.model);
             formData.append('prompt', source.prompt);
@@ -143,6 +153,32 @@ const app = createApp({
             videoFiles.value = Array.from(event.target.files || []);
         };
 
+        const appendReferenceUrl = (target, url) => {
+            const value = String(url || '').trim();
+            if (!value) return;
+            const current = target.imageUrls
+                .split('\n')
+                .map(item => item.trim())
+                .filter(Boolean);
+            if (!current.includes(value)) {
+                current.push(value);
+            }
+            target.imageUrls = current.join('\n');
+        };
+
+        const onResultDragStart = (event, item) => {
+            if (item.status !== 'completed' || !item.url) return;
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('text/plain', item.url);
+            event.dataTransfer.setData('application/x-media-tester-url', item.url);
+        };
+
+        const onReferenceDrop = (event, targetName) => {
+            const url = event.dataTransfer.getData('application/x-media-tester-url') || event.dataTransfer.getData('text/plain');
+            appendReferenceUrl(targetName === 'video' ? video : image, url);
+            pushLog(`[输入] 已从画廊添加参考图：${url}`);
+        };
+
         const createPlaceholder = (item) => {
             const result = {
                 id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -155,6 +191,7 @@ const app = createApp({
                 ...item,
             };
             results.value.unshift(result);
+            currentPage.value = 1;
             currentResult.value = result;
             currentLogs.value = result.logs;
             return result;
@@ -185,12 +222,29 @@ const app = createApp({
             selectedResult.value = null;
         };
 
+        const toggleLogs = () => {
+            showLogs.value = !showLogs.value;
+            if (showLogs.value) scrollLogs();
+        };
+
+        const closeLogs = () => {
+            showLogs.value = false;
+        };
+
         const clearResults = () => {
             results.value = [];
             currentResult.value = null;
             selectedResult.value = null;
             currentLogs.value = [];
-            pushLog(`[System] Cleared workspace results.`);
+            pushLog(`[系统] 已清空当前画廊显示。`);
+        };
+
+        const nextPage = () => {
+            currentPage.value = Math.min(totalPages.value, currentPage.value + 1);
+        };
+
+        const prevPage = () => {
+            currentPage.value = Math.max(1, currentPage.value - 1);
         };
 
         const runImageTask = async () => {
@@ -203,12 +257,12 @@ const app = createApp({
                 prompt: image.prompt,
                 meta,
                 logs: [
-                    `[System] Image task queued.`,
-                    `[Config] Model: ${image.model} | ${meta}`,
+                    `[系统] 图片任务已加入队列。`,
+                    `[配置] 模型：${image.model} | ${meta}`,
                 ],
             });
             if (imageFiles.value.length) {
-                placeholder.logs.push(`[Input] ${imageFiles.value.length} local reference image(s) attached.`);
+                placeholder.logs.push(`[输入] 已附加 ${imageFiles.value.length} 张本地参考图。`);
             }
             currentLogs.value = placeholder.logs;
 
@@ -223,19 +277,19 @@ const app = createApp({
 
                 const res = await fetch('/api/image', { method: 'POST', body: payload });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.message || 'Failed to start image task');
+                if (!res.ok) throw new Error(data.message || '图片任务启动失败');
 
                 updateResult(placeholder.id, {
                     taskId: data.internal_task_id,
                     status: 'running',
-                    logs: [...placeholder.logs, `[System] Backend accepted task ${data.internal_task_id}.`],
+                    logs: [...placeholder.logs, `[系统] 后端已接收任务：${data.internal_task_id}。`],
                 });
                 pollTask(data.internal_task_id, placeholder.id);
             } catch (err) {
                 updateResult(placeholder.id, {
                     status: 'error',
                     error: err.message,
-                    logs: [...placeholder.logs, `[Error] ${err.message}`],
+                    logs: [...placeholder.logs, `[错误] ${err.message}`],
                 });
                 console.error(err);
             } finally {
@@ -251,12 +305,12 @@ const app = createApp({
                 prompt: video.prompt,
                 meta,
                 logs: [
-                    `[System] Video task queued.`,
-                    `[Config] Model: ${video.model} | ${meta}`,
+                    `[系统] 视频任务已加入队列。`,
+                    `[配置] 模型：${video.model} | ${meta}`,
                 ],
             });
             if (videoFiles.value.length) {
-                placeholder.logs.push(`[Input] ${videoFiles.value.length} local reference image(s) attached.`);
+                placeholder.logs.push(`[输入] 已附加 ${videoFiles.value.length} 张本地参考图。`);
             }
             currentLogs.value = placeholder.logs;
 
@@ -270,19 +324,19 @@ const app = createApp({
 
                 const res = await fetch('/api/video', { method: 'POST', body: payload });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.message || 'Failed to start video task');
+                if (!res.ok) throw new Error(data.message || '视频任务启动失败');
 
                 updateResult(placeholder.id, {
                     taskId: data.internal_task_id,
                     status: 'running',
-                    logs: [...placeholder.logs, `[System] Backend accepted task ${data.internal_task_id}.`],
+                    logs: [...placeholder.logs, `[系统] 后端已接收任务：${data.internal_task_id}。`],
                 });
                 pollTask(data.internal_task_id, placeholder.id);
             } catch (err) {
                 updateResult(placeholder.id, {
                     status: 'error',
                     error: err.message,
-                    logs: [...placeholder.logs, `[Error] ${err.message}`],
+                    logs: [...placeholder.logs, `[错误] ${err.message}`],
                 });
                 console.error(err);
             } finally {
@@ -295,7 +349,7 @@ const app = createApp({
                 try {
                     const res = await fetch(`/api/task/${taskId}`);
                     const data = await res.json();
-                    if (!res.ok) throw new Error(data.message || 'Task status request failed');
+                    if (!res.ok) throw new Error(data.message || '任务状态查询失败');
 
                     const item = results.value.find(result => result.id === resultId);
                     if (!item) {
@@ -323,10 +377,10 @@ const app = createApp({
                         clearInterval(pollInterval);
                         const finalItem = results.value.find(result => result.id === resultId);
                         if (finalItem && finalItem.status === 'completed') {
-                            finalItem.logs = [...(finalItem.logs || []), `[System] ${finalItem.type === 'image' ? 'Image' : 'Video'} ready.`];
+                            finalItem.logs = [...(finalItem.logs || []), `[系统] ${finalItem.type === 'image' ? '图片' : '视频'}已完成。`];
                         }
                         if (finalItem && finalItem.status !== 'completed' && !finalItem.error) {
-                            finalItem.error = 'Task failed.';
+                            finalItem.error = '任务失败。';
                         }
                         if (currentResult.value?.id === resultId) {
                             currentLogs.value = finalItem?.logs || [];
@@ -334,7 +388,7 @@ const app = createApp({
                         }
                     }
                 } catch (e) {
-                    console.error('Poll error', e);
+                    console.error('轮询失败', e);
                 }
             }, 2000);
         };
@@ -344,8 +398,10 @@ const app = createApp({
             config, image, video,
             imageFiles, videoFiles,
             onImageFilesChange, onVideoFilesChange,
-            results, selectedResult,
-            openPreview, closePreview, clearResults,
+            onResultDragStart, onReferenceDrop,
+            results, paginatedResults, currentPage, totalPages, selectedResult, showLogs,
+            openPreview, closePreview, toggleLogs, closeLogs, clearResults,
+            nextPage, prevPage,
             submitTask,
             currentLogs, currentResult
         };

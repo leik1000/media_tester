@@ -6,6 +6,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
+from urllib.parse import urlparse, unquote
 
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
@@ -47,6 +48,25 @@ def form_urls(form) -> list[str]:
     return urls
 
 
+def split_reference_urls(urls: list[str]) -> tuple[list[str], list[str]]:
+    remote_urls: list[str] = []
+    local_files: list[str] = []
+    for url in urls:
+        value = str(url or "").strip()
+        if not value:
+            continue
+        parsed = urlparse(value)
+        path_value = parsed.path if parsed.scheme in {"http", "https"} else value
+        if path_value.startswith("/downloads/"):
+            filename = Path(unquote(path_value)).name
+            local_path = DOWNLOAD_DIR / filename
+            if local_path.is_file():
+                local_files.append(str(local_path))
+                continue
+        remote_urls.append(value)
+    return remote_urls, local_files
+
+
 def build_proxies(proxy_url: str) -> dict[str, str] | None:
     value = str(proxy_url or "").strip()
     if not value:
@@ -65,7 +85,7 @@ async def save_uploaded_images(form) -> list[str]:
         target = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
         raw = await upload.read()
         if not raw:
-            raise RuntimeError(f"uploaded image is empty: {filename}")
+            raise RuntimeError(f"上传的图片为空：{filename}")
         target.write_bytes(raw)
         saved_paths.append(str(target))
     return saved_paths
@@ -183,16 +203,16 @@ def list_assets():
 
 def run_image_task(internal_task_id: str, settings: dict):
     tasks_store[internal_task_id]["status"] = "running"
-    tasks_store[internal_task_id]["logs"].append("Image request started.")
+    tasks_store[internal_task_id]["logs"].append("图片请求已开始。")
 
     try:
         payload = image_runner.build_payload(settings)
-        tasks_store[internal_task_id]["logs"].append("Image payload built.")
+        tasks_store[internal_task_id]["logs"].append("图片请求参数已构建。")
         data = image_runner.create_image(settings, payload)
-        tasks_store[internal_task_id]["logs"].append("Image response received.")
+        tasks_store[internal_task_id]["logs"].append("已收到图片响应。")
         image_bytes, mime_type = image_runner.extract_inline_image(data, proxies=settings.get("proxies"))
         asset = save_image_asset(image_bytes, mime_type, settings)
-        tasks_store[internal_task_id]["logs"].append(f"Saved to downloads/{asset['filename']}.")
+        tasks_store[internal_task_id]["logs"].append(f"已保存到 downloads/{asset['filename']}。")
 
         tasks_store[internal_task_id]["status"] = "completed"
         tasks_store[internal_task_id]["image_url"] = asset["url"]
@@ -201,7 +221,7 @@ def run_image_task(internal_task_id: str, settings: dict):
     except Exception as e:
         tasks_store[internal_task_id]["status"] = "error"
         tasks_store[internal_task_id]["error"] = str(e)
-        tasks_store[internal_task_id]["logs"].append(f"Error: {str(e)}")
+        tasks_store[internal_task_id]["logs"].append(f"错误：{str(e)}")
     finally:
         cleanup_files(list(settings.get("_temp_files") or []))
 
@@ -210,6 +230,7 @@ def run_image_task(internal_task_id: str, settings: dict):
 async def generate_image(request: Request, background_tasks: BackgroundTasks):
     form = await request.form()
     temp_files = await save_uploaded_images(form)
+    remote_urls, local_reference_files = split_reference_urls(form_urls(form))
     settings = {
         "base_url": form_value(form, "base_url", image_runner.DEFAULT_BASE_URL),
         "proxy_url": form_value(form, "proxy_url"),
@@ -219,8 +240,8 @@ async def generate_image(request: Request, background_tasks: BackgroundTasks):
         "aspect_ratio": form_value(form, "aspect_ratio", image_runner.DEFAULT_ASPECT_RATIO),
         "image_size": form_value(form, "image_size", image_runner.DEFAULT_IMAGE_SIZE),
         "quality": form_value(form, "quality", image_runner.DEFAULT_OPENAI_QUALITY),
-        "image_url": form_urls(form),
-        "image_file": temp_files,
+        "image_url": remote_urls,
+        "image_file": temp_files + local_reference_files,
         "_temp_files": temp_files,
     }
     settings["request_timeout"] = 600
@@ -241,15 +262,15 @@ async def generate_image(request: Request, background_tasks: BackgroundTasks):
 
 def run_video_task(internal_task_id: str, settings: dict):
     tasks_store[internal_task_id]["status"] = "running"
-    tasks_store[internal_task_id]["logs"].append("Video request started.")
+    tasks_store[internal_task_id]["logs"].append("视频请求已开始。")
     
     try:
         payload = video_runner.build_payload(settings)
-        tasks_store[internal_task_id]["logs"].append("Video payload built.")
+        tasks_store[internal_task_id]["logs"].append("视频请求参数已构建。")
         create_data = video_runner.create_task(settings, payload)
         api_task_id = video_runner.extract_task_id(create_data)
         tasks_store[internal_task_id]["api_task_id"] = api_task_id
-        tasks_store[internal_task_id]["logs"].append(f"Remote task id: {api_task_id}")
+        tasks_store[internal_task_id]["logs"].append(f"远程任务 ID：{api_task_id}")
         
         result = video_runner.poll_task(settings, api_task_id)
         status = str(result.get("status") or "").strip().lower()
@@ -260,9 +281,9 @@ def run_video_task(internal_task_id: str, settings: dict):
             return
             
         media_url = video_runner.resolve_media_url(result)
-        tasks_store[internal_task_id]["logs"].append("Downloading video asset locally.")
+        tasks_store[internal_task_id]["logs"].append("正在下载视频到本地。")
         asset = save_video_asset(media_url, settings)
-        tasks_store[internal_task_id]["logs"].append(f"Saved to downloads/{asset['filename']}.")
+        tasks_store[internal_task_id]["logs"].append(f"已保存到 downloads/{asset['filename']}。")
         tasks_store[internal_task_id]["status"] = "completed"
         tasks_store[internal_task_id]["media_url"] = asset["url"]
         tasks_store[internal_task_id]["remote_url"] = media_url
@@ -272,7 +293,7 @@ def run_video_task(internal_task_id: str, settings: dict):
     except Exception as e:
         tasks_store[internal_task_id]["status"] = "error"
         tasks_store[internal_task_id]["error"] = str(e)
-        tasks_store[internal_task_id]["logs"].append(f"Error: {str(e)}")
+        tasks_store[internal_task_id]["logs"].append(f"错误：{str(e)}")
     finally:
         cleanup_files(list(settings.get("_temp_files") or []))
 
@@ -280,6 +301,7 @@ def run_video_task(internal_task_id: str, settings: dict):
 async def generate_video(request: Request, background_tasks: BackgroundTasks):
     form = await request.form()
     temp_files = await save_uploaded_images(form)
+    remote_urls, local_reference_files = split_reference_urls(form_urls(form))
     settings = {
         "base_url": form_value(form, "base_url", video_runner.DEFAULT_BASE_URL),
         "proxy_url": form_value(form, "proxy_url"),
@@ -291,8 +313,8 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
         "aspect_ratio": form_value(form, "aspect_ratio", video_runner.DEFAULT_ASPECT_RATIO),
         "size": form_value(form, "size"),
         "duration": int(form_value(form, "duration", str(video_runner.DEFAULT_DURATION)) or video_runner.DEFAULT_DURATION),
-        "image_url": form_urls(form),
-        "image_file": temp_files,
+        "image_url": remote_urls,
+        "image_file": temp_files + local_reference_files,
         "_temp_files": temp_files,
     }
     settings["request_timeout"] = 600

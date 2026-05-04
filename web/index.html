@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="zh-CN" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Media Tester Pro</title>
+    <title>媒体测试工具</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -87,7 +87,6 @@
         ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
         @media (max-height: 820px) {
-            .logs-panel { height: 190px !important; }
             .compact-upload { padding-top: 0.75rem !important; padding-bottom: 0.75rem !important; }
         }
     </style>
@@ -99,11 +98,14 @@
         <header class="glass-panel relative z-20 flex h-14 shrink-0 items-center justify-between border-b-0 px-5 shadow-2xl">
             <h1 class="flex items-center gap-3 bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-lg font-bold text-transparent">
                 <svg class="h-6 w-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"></path></svg>
-                Media Tester Pro
+                媒体测试工具
             </h1>
             <div class="flex gap-2">
-                <button @click="tab = 'image'" :class="['tab-btn', tab === 'image' ? 'active' : '']">Image Gen</button>
-                <button @click="tab = 'video'" :class="['tab-btn', tab === 'video' ? 'active' : '']">Video Gen</button>
+                <button @click="tab = 'image'" :class="['tab-btn', tab === 'image' ? 'active' : '']">图片生成</button>
+                <button @click="tab = 'video'" :class="['tab-btn', tab === 'video' ? 'active' : '']">视频生成</button>
+                <button @click="toggleLogs" class="ml-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-medium text-gray-300 transition hover:bg-white/10 hover:text-white" :class="showLogs ? 'border-indigo-300/30 bg-indigo-500/15 text-indigo-100' : ''">
+                    日志
+                </button>
             </div>
         </header>
 
@@ -111,47 +113,49 @@
         <main class="relative z-10 flex min-h-0 flex-1 overflow-hidden">
             
             <!-- Left Sidebar (Config) -->
-            <aside class="glass-panel relative z-10 flex w-[348px] shrink-0 flex-col gap-5 overflow-y-auto border-y-0 border-l-0 p-5 shadow-[4px_0_24px_rgba(0,0,0,0.2)] xl:w-[370px]">
+            <aside class="glass-panel relative z-10 flex w-[348px] shrink-0 flex-col gap-3 overflow-y-auto border-y-0 border-l-0 p-4 shadow-[4px_0_24px_rgba(0,0,0,0.2)] xl:w-[370px]">
                 <!-- Global Settings -->
-                <div class="space-y-3">
+                <div class="space-y-2.5">
                     <h2 class="text-xs font-bold uppercase tracking-widest text-indigo-400 flex items-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        API Settings
+                        接口设置
                     </h2>
                     <div>
-                        <label class="block text-xs font-medium text-gray-400 mb-1.5">Base URL</label>
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">接口地址</label>
                         <input type="text" class="glass-input text-sm" v-model="config.baseUrl" placeholder="https://api.pixellelabs.com">
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-gray-400 mb-1.5">Proxy URL</label>
-                        <input type="text" class="glass-input text-sm" v-model="config.proxyUrl" placeholder="Optional, e.g. http://127.0.0.1:10808">
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">代理地址</label>
+                        <input type="text" class="glass-input text-sm" v-model="config.proxyUrl" placeholder="例如 http://127.0.0.1:10808">
                     </div>
+                    <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-xs font-medium text-gray-300">
+                        <input type="checkbox" v-model="config.enableProxy" class="h-4 w-4 accent-indigo-500">
+                        <span>启用代理</span>
+                    </label>
                     <div>
-                        <label class="block text-xs font-medium text-gray-400 mb-1.5">Default API Key</label>
-                        <input type="password" class="glass-input text-sm" v-model="config.defaultApiKey" placeholder="Used when model key is empty">
+                        <label class="block text-xs font-medium text-gray-400 mb-1.5">公共 API Key</label>
+                        <input type="password" class="glass-input text-sm" v-model="config.defaultApiKey" placeholder="模型 Key 为空时使用">
                     </div>
-                    <div class="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                    <div class="rounded-xl border border-white/10 bg-white/[0.025] p-2.5">
                         <div class="mb-2 flex items-center justify-between gap-2">
-                            <span class="text-xs font-semibold uppercase tracking-widest text-indigo-300">Current Model Key</span>
-                            <span class="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-gray-400">optional</span>
+                            <span class="text-xs font-semibold uppercase tracking-widest text-indigo-300">当前模型 Key</span>
                         </div>
                         <div v-if="tab === 'image' && image.model === 'gpt-image-2'">
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">gpt-image-2 Key</label>
-                            <input type="password" class="glass-input text-sm" v-model="config.gptImage2ApiKey" placeholder="Fallback: Default API Key">
+                            <input type="password" class="glass-input text-sm" v-model="config.gptImage2ApiKey" placeholder="公共 API Key">
                         </div>
                         <div v-else-if="tab === 'image' && image.model === 'gemini-3-pro-image-preview'">
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">gemini-3-pro-image-preview Key</label>
-                            <input type="password" class="glass-input text-sm" v-model="config.gemini3ProImageApiKey" placeholder="Fallback: Default API Key">
+                            <input type="password" class="glass-input text-sm" v-model="config.gemini3ProImageApiKey" placeholder="公共 API Key">
                         </div>
                         <div v-else-if="tab === 'image' && image.model === 'gemini-3.1-flash-image-preview'">
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">gemini-3.1-flash-image-preview Key</label>
-                            <input type="password" class="glass-input text-sm" v-model="config.gemini31FlashImageApiKey" placeholder="Fallback: Default API Key">
+                            <input type="password" class="glass-input text-sm" v-model="config.gemini31FlashImageApiKey" placeholder="公共 API Key">
                         </div>
                         <div v-else>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Video Models Key</label>
-                            <input type="password" class="glass-input text-sm" v-model="config.videoApiKey" placeholder="Fallback: Default API Key">
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">视频模型 Key</label>
+                            <input type="password" class="glass-input text-sm" v-model="config.videoApiKey" placeholder="公共 API Key">
                         </div>
-                        <p class="mt-2 text-[11px] leading-4 text-gray-500">Only the selected model key is shown. Empty value uses Default API Key.</p>
                     </div>
                 </div>
 
@@ -160,13 +164,13 @@
                 <!-- Tab Specific Settings -->
                 <!-- IMAGE CONFIG -->
                 <transition name="fade" mode="out-in">
-                    <div v-if="tab === 'image'" class="space-y-4">
+                    <div v-if="tab === 'image'" class="space-y-3">
                         <h2 class="text-xs font-bold uppercase tracking-widest text-indigo-400 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                            Image Config
+                            图片设置
                         </h2>
                         <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Model</label>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">模型</label>
                             <select class="glass-input text-sm appearance-none" v-model="image.model">
                                 <option class="bg-gray-900" value="gemini-3-pro-image-preview">gemini-3-pro-image-preview</option>
                                 <option class="bg-gray-900" value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
@@ -174,12 +178,12 @@
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Prompt</label>
-                            <textarea class="glass-input text-sm resize-none" v-model="image.prompt" rows="2" placeholder="A cinematic mountain sunrise..."></textarea>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">提示词</label>
+                            <textarea class="glass-input text-sm resize-none" v-model="image.prompt" rows="2" placeholder="例如：电影感山间日出，云雾流动..."></textarea>
                         </div>
                         <div class="flex gap-4">
                             <div class="flex-1">
-                                <label class="block text-xs font-medium text-gray-400 mb-1.5">Ratio</label>
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">比例</label>
                                 <select class="glass-input text-sm appearance-none" v-model="image.aspectRatio">
                                     <option class="bg-gray-900">16:9</option>
                                     <option class="bg-gray-900">9:16</option>
@@ -194,7 +198,7 @@
                                 </select>
                             </div>
                             <div class="flex-1">
-                                <label class="block text-xs font-medium text-gray-400 mb-1.5">Size</label>
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">尺寸</label>
                                 <select class="glass-input text-sm appearance-none" v-model="image.size">
                                     <option class="bg-gray-900">1K</option>
                                     <option class="bg-gray-900">2K</option>
@@ -203,34 +207,28 @@
                             </div>
                         </div>
                         <div v-if="image.model === 'gpt-image-2'">
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Quality</label>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">质量</label>
                             <select class="glass-input text-sm appearance-none" v-model="image.quality">
-                                <option class="bg-gray-900" value="low">low</option>
-                                <option class="bg-gray-900" value="medium">medium</option>
-                                <option class="bg-gray-900" value="high">high</option>
+                                <option class="bg-gray-900" value="low">低</option>
+                                <option class="bg-gray-900" value="medium">中</option>
+                                <option class="bg-gray-900" value="high">高</option>
                             </select>
-                            <p class="mt-1.5 text-[11px] text-indigo-400/70">Only sent for gpt-image-2. Default: medium.</p>
                         </div>
                         <div>
                             <label class="block text-xs font-medium text-gray-400 mb-1.5 flex justify-between items-end">
-                                Reference Image URLs 
-                                <span class="text-[10px] text-gray-500 font-normal">(1 per line)</span>
+                                参考图地址
+                                <span class="text-[10px] text-gray-500 font-normal">（每行一个）</span>
                             </label>
                             <textarea class="glass-input text-sm resize-none" v-model="image.imageUrls" rows="2" placeholder="https://..."></textarea>
-                            <p class="text-[11px] text-indigo-400/70 mt-2 flex items-center gap-1">
-                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                URLs trigger Edit mode in gpt-image-2
-                            </p>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Local Reference Images</label>
-                            <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10">
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">本地参考图</label>
+                            <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10" @dragover.prevent @drop.prevent="onReferenceDrop($event, 'image')">
                                 <input type="file" class="hidden" multiple accept="image/*" @change="onImageFilesChange">
                                 <div class="flex flex-col items-center gap-2">
-                                    <svg class="w-6 h-6 text-indigo-400 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                                    <span class="text-xs text-gray-300">Click to upload local images</span>
-                                    <span class="text-[11px] text-gray-500" v-if="!imageFiles.length">PNG / JPG / WebP supported</span>
-                                    <span class="text-[11px] text-indigo-300" v-else>{{ imageFiles.length }} file(s) selected</span>
+                                    <svg class="w-5 h-5 text-indigo-400 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                                    <span class="text-xs text-gray-300">点击上传 / 拖入画廊素材</span>
+                                    <span class="text-[11px] text-indigo-300" v-if="imageFiles.length">已选择 {{ imageFiles.length }} 个文件</span>
                                 </div>
                             </label>
                         </div>
@@ -239,13 +237,13 @@
 
                 <!-- VIDEO CONFIG -->
                 <transition name="fade" mode="out-in">
-                    <div v-if="tab === 'video'" class="space-y-4">
+                    <div v-if="tab === 'video'" class="space-y-3">
                         <h2 class="text-xs font-bold uppercase tracking-widest text-indigo-400 flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                            Video Config
+                            视频设置
                         </h2>
                         <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Model</label>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">模型</label>
                             <select class="glass-input text-sm appearance-none" v-model="video.model">
                                 <option class="bg-gray-900" value="sora2">sora2</option>
                                 <option class="bg-gray-900" value="veo31">veo31</option>
@@ -254,52 +252,51 @@
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Prompt</label>
-                            <textarea class="glass-input text-sm resize-none" v-model="video.prompt" rows="2" placeholder="A cinematic hummingbird..."></textarea>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">提示词</label>
+                            <textarea class="glass-input text-sm resize-none" v-model="video.prompt" rows="2" placeholder="例如：电影感蜂鸟飞过阳光花园..."></textarea>
                         </div>
                         <div class="flex gap-4">
                             <div class="flex-1">
-                                <label class="block text-xs font-medium text-gray-400 mb-1.5">Ratio</label>
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">比例</label>
                                 <select class="glass-input text-sm appearance-none" v-model="video.aspectRatio">
                                     <option class="bg-gray-900">16:9</option>
                                     <option class="bg-gray-900">9:16</option>
                                 </select>
                             </div>
                             <div class="flex-1">
-                                <label class="block text-xs font-medium text-gray-400 mb-1.5">Duration (s)</label>
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">时长（秒）</label>
                                 <input type="number" class="glass-input text-sm" v-model.number="video.duration">
                             </div>
                         </div>
                         <div class="flex gap-4">
                             <div class="flex-1">
-                                <label class="block text-xs font-medium text-gray-400 mb-1.5">Create Path</label>
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">创建路径</label>
                                 <input type="text" class="glass-input text-sm" v-model="video.createPath">
                             </div>
                             <div class="flex-1">
-                                <label class="block text-xs font-medium text-gray-400 mb-1.5">Status Path</label>
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">状态路径</label>
                                 <input type="text" class="glass-input text-sm" v-model="video.statusPath">
                             </div>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Reference Image URLs</label>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">参考图地址</label>
                             <textarea class="glass-input text-sm resize-none" v-model="video.imageUrls" rows="2" placeholder="https://..."></textarea>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">Local Reference Images</label>
-                            <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10">
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">本地参考图</label>
+                            <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10" @dragover.prevent @drop.prevent="onReferenceDrop($event, 'video')">
                                 <input type="file" class="hidden" multiple accept="image/*" @change="onVideoFilesChange">
                                 <div class="flex flex-col items-center gap-2">
-                                    <svg class="w-6 h-6 text-indigo-400 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                                    <span class="text-xs text-gray-300">Click to upload local reference images</span>
-                                    <span class="text-[11px] text-gray-500" v-if="!videoFiles.length">Used as video input_reference</span>
-                                    <span class="text-[11px] text-indigo-300" v-else>{{ videoFiles.length }} file(s) selected</span>
+                                    <svg class="w-5 h-5 text-indigo-400 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                                    <span class="text-xs text-gray-300">点击上传 / 拖入画廊素材</span>
+                                    <span class="text-[11px] text-indigo-300" v-if="videoFiles.length">已选择 {{ videoFiles.length }} 个文件</span>
                                 </div>
                             </label>
                         </div>
                     </div>
                 </transition>
 
-                <div class="sticky bottom-0 -mx-5 mt-2 bg-slate-950/75 px-5 pb-1 pt-4 backdrop-blur-xl">
+                <div class="sticky bottom-0 -mx-4 mt-1 bg-slate-950/75 px-4 pb-1 pt-3 backdrop-blur-xl">
                     <button @click="submitTask" 
                             :disabled="isSubmitting"
                             class="flex w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 font-semibold text-white shadow-[0_0_20px_rgba(79,70,229,0.3)] transition-all duration-300 hover:from-indigo-500 hover:to-purple-500 hover:shadow-[0_0_30px_rgba(79,70,229,0.5)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none">
@@ -308,8 +305,8 @@
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                         <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                        <span v-if="isSubmitting">Submitting...</span>
-                        <span v-else>Generate {{ tab === 'image' ? 'Image' : 'Video' }}</span>
+                        <span v-if="isSubmitting">提交中...</span>
+                        <span v-else>生成{{ tab === 'image' ? '图片' : '视频' }}</span>
                     </button>
                 </div>
             </aside>
@@ -321,12 +318,20 @@
                 <div class="relative min-h-0 flex-1 overflow-y-auto p-5">
                     <div class="mb-4 flex items-center justify-between gap-4">
                         <div>
-                            <h2 class="text-base font-semibold tracking-tight text-white">Generation Gallery</h2>
-                            <p class="text-xs text-gray-500">{{ results.length }} result(s). Click any card to preview.</p>
+                            <h2 class="text-base font-semibold tracking-tight text-white">生成画廊</h2>
+                            <p class="text-xs text-gray-500">共 {{ results.length }} 个结果，第 {{ currentPage }} / {{ totalPages }} 页</p>
                         </div>
-                        <button v-if="results.length" @click="clearResults" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white">
-                            Clear Gallery
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button v-if="results.length" @click="prevPage" :disabled="currentPage <= 1" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
+                                上一页
+                            </button>
+                            <button v-if="results.length" @click="nextPage" :disabled="currentPage >= totalPages" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
+                                下一页
+                            </button>
+                            <button v-if="results.length" @click="clearResults" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white">
+                                清空
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Empty State -->
@@ -336,15 +341,15 @@
                                 <div class="w-24 h-24 rounded-3xl bg-white/5 flex items-center justify-center mb-2 shadow-[inset_0_0_20px_rgba(255,255,255,0.05)] border border-white/5">
                                     <svg class="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
                                 </div>
-                                <h3 class="text-lg font-medium text-gray-300">Gallery Empty</h3>
-                                <p class="text-sm">Generate images or videos to build a visual result grid here.</p>
+                                <h3 class="text-lg font-medium text-gray-300">画廊为空</h3>
+                                <p class="text-sm">生成图片或视频后，会显示在这里。</p>
                             </div>
                         </div>
                     </transition>
 
                     <!-- Results Grid -->
-                    <div v-if="results.length" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                        <button v-for="item in results" :key="item.id" @click="openPreview(item)" class="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left shadow-lg backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-indigo-300/40 hover:bg-white/[0.07] hover:shadow-[0_18px_45px_rgba(79,70,229,0.22)]">
+                    <div v-if="results.length" class="grid grid-cols-5 gap-3">
+                        <button v-for="item in paginatedResults" :key="item.id" @click="openPreview(item)" :draggable="item.status === 'completed' && !!item.url" @dragstart="onResultDragStart($event, item)" class="group overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] text-left shadow-lg backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-indigo-300/40 hover:bg-white/[0.07] hover:shadow-[0_18px_45px_rgba(79,70,229,0.22)]">
                             <div class="relative aspect-video overflow-hidden bg-black/30">
                                 <img v-if="item.status === 'completed' && item.type === 'image'" :src="item.url" class="h-full w-full object-cover transition duration-500 group-hover:scale-105">
                                 <video v-else-if="item.status === 'completed' && item.type === 'video'" muted preload="metadata" class="h-full w-full object-cover transition duration-500 group-hover:scale-105">
@@ -352,34 +357,33 @@
                                 </video>
                                 <div v-else-if="item.status === 'error' || item.status === 'failed'" class="flex h-full w-full flex-col items-center justify-center bg-red-950/30 p-4 text-center">
                                     <svg class="mb-3 h-9 w-9 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"></path></svg>
-                                    <p class="line-clamp-2 text-xs text-red-100">{{ item.error || 'Task failed' }}</p>
+                                    <p class="line-clamp-2 text-xs text-red-100">{{ item.error || '任务失败' }}</p>
                                 </div>
                                 <div v-else class="flex h-full w-full flex-col items-center justify-center bg-white/[0.03] p-4">
                                     <div class="relative mb-4 h-12 w-20 overflow-hidden rounded-xl border border-white/10 bg-white/5">
                                         <div class="absolute inset-0 translate-x-[-100%] bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_2s_infinite]"></div>
                                     </div>
-                                    <p class="text-xs font-medium text-indigo-200">{{ item.status === 'starting' ? 'Starting...' : 'Rendering...' }}</p>
+                                    <p class="text-xs font-medium text-indigo-200">{{ item.status === 'starting' ? '启动中...' : '生成中...' }}</p>
                                 </div>
                                 <div class="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-80"></div>
-                                <div class="absolute left-3 top-3 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white backdrop-blur-md">
-                                    {{ item.type }}
+                                <div class="absolute left-2 top-2 rounded-full border border-white/10 bg-black/45 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-md">
+                                    {{ item.type === 'image' ? '图片' : '视频' }}
                                 </div>
-                                <div class="absolute right-3 top-3 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide backdrop-blur-md" :class="item.status === 'completed' ? 'border-emerald-300/20 bg-emerald-500/15 text-emerald-200' : (item.status === 'error' || item.status === 'failed' ? 'border-red-300/20 bg-red-500/15 text-red-200' : 'border-indigo-300/20 bg-indigo-500/15 text-indigo-200')">
-                                    {{ item.status }}
+                                <div class="absolute right-2 top-2 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide backdrop-blur-md" :class="item.status === 'completed' ? 'border-emerald-300/20 bg-emerald-500/15 text-emerald-200' : (item.status === 'error' || item.status === 'failed' ? 'border-red-300/20 bg-red-500/15 text-red-200' : 'border-indigo-300/20 bg-indigo-500/15 text-indigo-200')">
+                                    {{ item.status === 'completed' ? '完成' : (item.status === 'error' || item.status === 'failed' ? '失败' : '生成中') }}
                                 </div>
                                 <div v-if="item.status === 'completed' && item.type === 'video'" class="absolute inset-0 flex items-center justify-center">
                                     <div class="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-md transition group-hover:scale-110">
                                         <svg class="ml-1 h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
                                     </div>
                                 </div>
-                                <div class="absolute bottom-3 left-3 right-3">
-                                    <p class="truncate text-sm font-semibold text-white">{{ item.model }}</p>
-                                    <p class="mt-0.5 truncate text-xs text-gray-300">{{ item.meta }}</p>
+                                <div class="absolute bottom-2 left-2 right-2">
+                                    <p class="truncate text-xs font-semibold text-white">{{ item.model }}</p>
+                                    <p class="mt-0.5 truncate text-[11px] text-gray-300">{{ item.meta }}</p>
                                 </div>
                             </div>
-                            <div class="space-y-1.5 p-3">
-                                <p class="line-clamp-2 min-h-[2.25rem] text-xs leading-5 text-gray-300">{{ item.prompt }}</p>
-                                <p class="text-[11px] text-gray-500">{{ item.createdAt }}</p>
+                            <div class="p-2.5">
+                                <p class="truncate text-[11px] text-gray-500">{{ item.createdAt }}</p>
                             </div>
                         </button>
                     </div>
@@ -407,30 +411,39 @@
                             <div class="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-5 py-4">
                                 <p class="line-clamp-2 max-w-3xl text-sm text-gray-400">{{ selectedResult.prompt }}</p>
                                 <div class="flex gap-2">
-                                    <a v-if="selectedResult.type === 'image'" :href="selectedResult.url" download="generated_image.png" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">Download</a>
-                                    <a v-else :href="selectedResult.url" target="_blank" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">Open URL</a>
+                                    <a v-if="selectedResult.type === 'image'" :href="selectedResult.url" download="generated_image.png" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">下载</a>
+                                    <a v-else :href="selectedResult.url" target="_blank" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">打开链接</a>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </transition>
 
-                <!-- Logs Panel -->
-                <div class="logs-panel glass-panel mx-4 flex h-[220px] shrink-0 flex-col rounded-t-3xl border-x-0 border-b-0 shadow-[0_-10px_40px_rgba(0,0,0,0.2)]">
-                    <div class="flex items-center gap-3 border-b border-white/5 px-5 py-3">
-                        <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                        <h3 class="text-sm font-medium text-gray-300 tracking-wide">Activity Logs</h3>
-                    </div>
-                    <div class="flex-1 overflow-auto p-4 font-mono text-[12px] leading-relaxed">
-                        <div class="text-emerald-400/90 whitespace-pre-wrap flex flex-col gap-1.5">
-                            <div v-for="(log, i) in currentLogs" :key="i" class="animate-[fade-in_0.3s_ease-out]">
-                                <span class="text-gray-500 mr-2">[{{ new Date().toLocaleTimeString() }}]</span>
-                                {{ log }}
+                <!-- Logs Drawer -->
+                <transition name="fade">
+                    <div v-if="showLogs" class="absolute inset-0 z-40 flex justify-end bg-black/30 backdrop-blur-[2px]" @click.self="closeLogs">
+                        <div class="glass-panel flex h-full w-full max-w-xl flex-col border-y-0 border-r-0 shadow-[-20px_0_60px_rgba(0,0,0,0.35)]">
+                            <div class="flex items-center justify-between gap-3 border-b border-white/5 px-5 py-4">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                                    <h3 class="text-sm font-medium text-gray-200 tracking-wide">日志</h3>
+                                </div>
+                                <button @click="closeLogs" class="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white">
+                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
                             </div>
-                            <div v-if="currentLogs.length === 0" class="text-gray-600 italic">System is idle. Ready to initiate sequence.</div>
+                            <div class="flex-1 overflow-auto p-5 font-mono text-[12px] leading-relaxed">
+                                <div class="text-emerald-400/90 whitespace-pre-wrap flex flex-col gap-1.5">
+                                    <div v-for="(log, i) in currentLogs" :key="i" class="animate-[fade-in_0.3s_ease-out]">
+                                        <span class="text-gray-500 mr-2">[{{ new Date().toLocaleTimeString() }}]</span>
+                                        {{ log }}
+                                    </div>
+                                    <div v-if="currentLogs.length === 0" class="text-gray-600 italic">当前没有日志。</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
+                </transition>
             </section>
         </main>
     </div>
