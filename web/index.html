@@ -402,8 +402,8 @@
                             <button v-if="results.length" @click="nextPage" :disabled="currentPage >= totalPages" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
                                 下一页
                             </button>
-                            <button v-if="results.length" @click="clearResults" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white">
-                                清空
+                            <button @click="refreshTaskList" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 transition hover:bg-white/10 hover:text-white">
+                                刷新
                             </button>
                         </div>
                     </div>
@@ -553,6 +553,6 @@
         @keyframes shimmer { 100% { transform: translateX(100%); } }
         @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
-    <script src="/static/app.js?v=20260504-thumbnails"></script>
+    <script src="/static/app.js?v=20260504-refresh-tasks"></script>
 </body>
 </html>

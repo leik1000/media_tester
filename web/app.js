@@ -67,6 +67,7 @@ const app = createApp({
         const currentPage = ref(1);
         const pageSize = 25;
         let saveConfigTimer = null;
+        const activePolls = new Map();
         const imageFiles = ref([]);
         const videoFiles = ref([]);
 
@@ -211,6 +212,8 @@ const app = createApp({
 
         const logout = async () => {
             await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+            activePolls.forEach(interval => clearInterval(interval));
+            activePolls.clear();
             isAuthenticated.value = false;
             configLoaded.value = false;
             results.value = [];
@@ -288,6 +291,10 @@ const app = createApp({
             } catch (e) {
                 console.error('加载任务失败', e);
             }
+        };
+
+        const refreshTaskList = async () => {
+            await loadPersistedTasks();
         };
 
         watch([config, image, video], () => {
@@ -463,14 +470,6 @@ const app = createApp({
             showLogs.value = false;
         };
 
-        const clearResults = () => {
-            results.value = [];
-            currentResult.value = null;
-            selectedResult.value = null;
-            currentLogs.value = [];
-            pushLog(`[系统] 已清空当前画廊显示。`);
-        };
-
         const nextPage = () => {
             currentPage.value = Math.min(totalPages.value, currentPage.value + 1);
         };
@@ -597,6 +596,7 @@ const app = createApp({
         };
 
         const pollTask = (taskId, resultId) => {
+            if (activePolls.has(taskId)) return;
             const pollInterval = setInterval(async () => {
                 try {
                     const res = await fetch(`/api/task/${taskId}`);
@@ -606,6 +606,7 @@ const app = createApp({
                     const item = results.value.find(result => result.id === resultId);
                     if (!item) {
                         clearInterval(pollInterval);
+                        activePolls.delete(taskId);
                         return;
                     }
 
@@ -637,6 +638,7 @@ const app = createApp({
 
                     if (data.status === 'completed' || data.status === 'failed' || data.status === 'error') {
                         clearInterval(pollInterval);
+                        activePolls.delete(taskId);
                         const finalItem = results.value.find(result => result.id === resultId);
                         if (finalItem && finalItem.status === 'completed') {
                             finalItem.logs = [...(finalItem.logs || []), `[系统] ${finalItem.type === 'image' ? '图片' : '视频'}已完成。`];
@@ -653,6 +655,7 @@ const app = createApp({
                     console.error('轮询失败', e);
                 }
             }, 2000);
+            activePolls.set(taskId, pollInterval);
         };
 
         return {
@@ -664,7 +667,7 @@ const app = createApp({
             onImageFilesChange, onVideoFilesChange,
             onResultDragStart, onReferenceDrop,
             results, paginatedResults, currentPage, totalPages, selectedResult, showLogs,
-            openPreview, closePreview, toggleLogs, closeLogs, clearResults,
+            openPreview, closePreview, toggleLogs, closeLogs, refreshTaskList,
             submitLogin, logout, updateAuth,
             nextPage, prevPage,
             submitTask,
