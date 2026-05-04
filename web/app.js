@@ -1,5 +1,56 @@
 const { createApp, ref, reactive, watch, onMounted, computed } = Vue;
 
+const VIDEO_MODEL_CAPS = {
+    'kling-video-3.0': {
+        ratios: ['1:1', '16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        durationRange: [3, 15],
+        maxRefs: 1,
+        supportsStartEnd: false,
+        supportsVideoReference: false,
+    },
+    'kling-video-o3-omni': {
+        ratios: ['1:1', '16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        durationRange: [3, 15],
+        maxRefs: 7,
+        supportsStartEnd: true,
+        supportsVideoReference: true,
+    },
+    'sora2': {
+        ratios: ['16:9', '9:16'],
+        resolutions: ['720p'],
+        durations: [4, 8, 12],
+        maxRefs: 1,
+        supportsStartEnd: false,
+        supportsVideoReference: false,
+    },
+    'sora-v3-pro': {
+        ratios: ['21:9', '1:1', '4:3', '3:4', '16:9', '9:16'],
+        resolutions: ['480p', '720p'],
+        durationRange: [4, 15],
+        maxRefs: 4,
+        supportsStartEnd: true,
+        supportsVideoReference: true,
+    },
+    'sora-v3-fast': {
+        ratios: ['21:9', '1:1', '4:3', '3:4', '16:9', '9:16'],
+        resolutions: ['480p', '720p'],
+        durationRange: [4, 15],
+        maxRefs: 4,
+        supportsStartEnd: true,
+        supportsVideoReference: true,
+    },
+    'veo31-fast': {
+        ratios: ['16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        durations: [4, 6, 8],
+        maxRefs: 1,
+        supportsStartEnd: false,
+        supportsVideoReference: false,
+    },
+};
+
 const app = createApp({
     setup() {
         const tab = ref('image');
@@ -9,8 +60,10 @@ const app = createApp({
         const results = ref([]);
         const selectedResult = ref(null);
         const showLogs = ref(false);
+        const configLoaded = ref(false);
         const currentPage = ref(1);
         const pageSize = 25;
+        let saveConfigTimer = null;
         const imageFiles = ref([]);
         const videoFiles = ref([]);
 
@@ -47,29 +100,72 @@ const app = createApp({
             model: 'sora2',
             prompt: '电影感蜂鸟飞过阳光花园',
             aspectRatio: '16:9',
+            resolution: '720p',
             duration: 4,
             createPath: '/v1/videos',
             statusPath: '/v1/videos/{task_id}',
+            startFrame: '',
+            endFrame: '',
+            videoReference: '',
             imageUrls: ''
         });
 
-        onMounted(async () => {
-            const saved = localStorage.getItem('mediaTesterConfigPro');
-            if (saved) {
-                try {
-                    const parsed = JSON.parse(saved);
-                    Object.assign(config, parsed.config || {});
-                    if (!config.defaultApiKey && parsed.config?.apiKey) {
-                        config.defaultApiKey = parsed.config.apiKey;
-                    }
-                    Object.assign(image, parsed.image || {});
-                    Object.assign(video, parsed.video || {});
-                } catch (e) {
-                    console.error('加载配置失败', e);
-                }
+        const videoModelOptions = Object.keys(VIDEO_MODEL_CAPS);
+        const currentVideoCapability = computed(() => VIDEO_MODEL_CAPS[video.model] || VIDEO_MODEL_CAPS.sora2);
+        const videoDurationOptions = computed(() => currentVideoCapability.value.durations || []);
+        const videoDurationRange = computed(() => currentVideoCapability.value.durationRange || null);
+        const videoDurationMin = computed(() => videoDurationRange.value ? videoDurationRange.value[0] : null);
+        const videoDurationMax = computed(() => videoDurationRange.value ? videoDurationRange.value[1] : null);
+
+        const normalizeVideoSettings = () => {
+            if (!VIDEO_MODEL_CAPS[video.model]) video.model = 'sora2';
+            const cap = currentVideoCapability.value;
+            if (!cap.ratios.includes(video.aspectRatio)) video.aspectRatio = cap.ratios[0];
+            if (!cap.resolutions.includes(video.resolution)) video.resolution = cap.resolutions[0];
+            if (cap.durations) {
+                const value = Number(video.duration);
+                if (!cap.durations.includes(value)) video.duration = cap.durations[0];
+            } else if (cap.durationRange) {
+                const [min, max] = cap.durationRange;
+                const value = Number(video.duration) || min;
+                video.duration = Math.min(max, Math.max(min, value));
             }
+            if (!cap.supportsStartEnd) {
+                video.startFrame = '';
+                video.endFrame = '';
+            }
+            if (!cap.supportsVideoReference) {
+                video.videoReference = '';
+            }
+        };
+
+        onMounted(async () => {
+            await loadSavedConfig();
+            configLoaded.value = true;
             await loadPersistedAssets();
         });
+
+        const applySavedConfig = (savedData) => {
+            Object.assign(config, savedData.config || {});
+            if (!config.defaultApiKey && savedData.config?.apiKey) {
+                config.defaultApiKey = savedData.config.apiKey;
+            }
+            Object.assign(image, savedData.image || {});
+            Object.assign(video, savedData.video || {});
+            normalizeVideoSettings();
+        };
+
+        const loadSavedConfig = async () => {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                if (res.ok && data.config && Object.keys(data.config).length) {
+                    applySavedConfig(data.config);
+                }
+            } catch (e) {
+                console.error('读取数据库配置失败', e);
+            }
+        };
 
 
         const loadPersistedAssets = async () => {
@@ -92,10 +188,19 @@ const app = createApp({
         };
 
         watch([config, image, video], () => {
-            localStorage.setItem('mediaTesterConfigPro', JSON.stringify({
-                config, image, video
-            }));
+            if (!configLoaded.value) return;
+            const payload = JSON.stringify({ config, image, video });
+            clearTimeout(saveConfigTimer);
+            saveConfigTimer = setTimeout(() => {
+                fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload,
+                }).catch(e => console.error('保存数据库配置失败', e));
+            }, 400);
         }, { deep: true });
+
+        watch(() => video.model, normalizeVideoSettings);
 
         const scrollLogs = () => {
             const logContainer = document.querySelector('.overflow-auto.font-mono');
@@ -133,16 +238,18 @@ const app = createApp({
 
         const resolveVideoApiKey = () => config.videoApiKey || config.defaultApiKey || '';
 
-        const appendCommonImageFields = (formData, source, apiKey) => {
+        const appendCommonImageFields = (formData, source, apiKey, options = {}) => {
             formData.append('base_url', config.baseUrl);
             formData.append('proxy_url', config.enableProxy ? (config.proxyUrl || '') : '');
             formData.append('api_key', apiKey || '');
             formData.append('model', source.model);
             formData.append('prompt', source.prompt);
             formData.append('aspect_ratio', source.aspectRatio);
-            source.imageUrls.split('\n').map(s => s.trim()).filter(Boolean).forEach(url => {
-                formData.append('image_url', url);
-            });
+            if (options.includeReferences !== false) {
+                source.imageUrls.split('\n').map(s => s.trim()).filter(Boolean).forEach(url => {
+                    formData.append('image_url', url);
+                });
+            }
         };
 
         const onImageFilesChange = (event) => {
@@ -267,6 +374,13 @@ const app = createApp({
             currentLogs.value = placeholder.logs;
 
             try {
+                if (!usingStartEnd) {
+                    const urlRefCount = video.imageUrls.split('\n').map(s => s.trim()).filter(Boolean).length;
+                    const referenceCount = urlRefCount + videoFiles.value.length;
+                    if (referenceCount > cap.maxRefs) {
+                        throw new Error(`当前模型最多支持 ${cap.maxRefs} 张参考图。`);
+                    }
+                }
                 const payload = new FormData();
                 appendCommonImageFields(payload, image, resolveImageApiKey(image.model));
                 payload.append('image_size', image.size);
@@ -298,7 +412,10 @@ const app = createApp({
         };
 
         const runVideoTask = async () => {
-            const meta = `${video.duration}s · ${video.aspectRatio}`;
+            normalizeVideoSettings();
+            const cap = currentVideoCapability.value;
+            const usingStartEnd = cap.supportsStartEnd && (String(video.startFrame || '').trim() || String(video.endFrame || '').trim());
+            const meta = `${video.duration}s · ${video.aspectRatio} · ${video.resolution}`;
             const placeholder = createPlaceholder({
                 type: 'video',
                 model: video.model,
@@ -316,11 +433,21 @@ const app = createApp({
 
             try {
                 const payload = new FormData();
-                appendCommonImageFields(payload, video, resolveVideoApiKey());
+                appendCommonImageFields(payload, video, resolveVideoApiKey(), { includeReferences: !usingStartEnd });
                 payload.append('duration', video.duration);
+                payload.append('resolution', video.resolution);
                 payload.append('create_path', video.createPath);
                 payload.append('status_path', video.statusPath);
-                videoFiles.value.forEach(file => payload.append('image_file', file));
+                if (cap.supportsStartEnd) {
+                    if (video.startFrame.trim()) payload.append('start_frame', video.startFrame.trim());
+                    if (video.endFrame.trim()) payload.append('end_frame', video.endFrame.trim());
+                }
+                if (cap.supportsVideoReference && video.videoReference.trim()) {
+                    payload.append('video_reference', video.videoReference.trim());
+                }
+                if (!usingStartEnd) {
+                    videoFiles.value.forEach(file => payload.append('image_file', file));
+                }
 
                 const res = await fetch('/api/video', { method: 'POST', body: payload });
                 const data = await res.json();
@@ -396,6 +523,7 @@ const app = createApp({
         return {
             tab, isLoading, isSubmitting,
             config, image, video,
+            videoModelOptions, currentVideoCapability, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
             imageFiles, videoFiles,
             onImageFilesChange, onVideoFilesChange,
             onResultDragStart, onReferenceDrop,

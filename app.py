@@ -2,6 +2,7 @@ import uuid
 import base64
 import json
 import mimetypes
+import sqlite3
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -25,10 +26,57 @@ app.mount("/static", StaticFiles(directory="web"), name="static")
 tasks_store: Dict[str, Dict[str, Any]] = {}
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
 DOWNLOAD_DIR = Path(__file__).resolve().parent / "downloads"
+DATA_DIR = Path(__file__).resolve().parent / "data"
+CONFIG_DB_PATH = DATA_DIR / "config.db"
 MANIFEST_PATH = DOWNLOAD_DIR / "manifest.json"
 manifest_lock = threading.Lock()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/downloads", StaticFiles(directory=str(DOWNLOAD_DIR)), name="downloads")
+
+
+def init_config_db() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS configs (
+                name TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+
+def read_saved_config() -> dict[str, Any]:
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        row = conn.execute("SELECT value FROM configs WHERE name = ?", ("default",)).fetchone()
+    if not row:
+        return {}
+    try:
+        data = json.loads(row[0])
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_saved_config(data: dict[str, Any]) -> None:
+    payload = json.dumps(data, ensure_ascii=False)
+    with sqlite3.connect(CONFIG_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO configs (name, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(name) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            ("default", payload),
+        )
+
+
+init_config_db()
 
 
 def form_value(form, name: str, default: str = "") -> str:
@@ -189,6 +237,20 @@ def read_root():
     return FileResponse("web/index.html")
 
 
+@app.get("/api/config")
+def get_config():
+    return {"config": read_saved_config()}
+
+
+@app.post("/api/config")
+async def save_config(request: Request):
+    data = await request.json()
+    if not isinstance(data, dict):
+        return JSONResponse(status_code=400, content={"message": "配置必须是 JSON 对象"})
+    write_saved_config(data)
+    return {"status": "ok"}
+
+
 @app.get("/api/assets")
 def list_assets():
     with manifest_lock:
@@ -313,6 +375,10 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
         "aspect_ratio": form_value(form, "aspect_ratio", video_runner.DEFAULT_ASPECT_RATIO),
         "size": form_value(form, "size"),
         "duration": int(form_value(form, "duration", str(video_runner.DEFAULT_DURATION)) or video_runner.DEFAULT_DURATION),
+        "resolution": form_value(form, "resolution"),
+        "start_frame": form_value(form, "start_frame"),
+        "end_frame": form_value(form, "end_frame"),
+        "video_reference": form_value(form, "video_reference"),
         "image_url": remote_urls,
         "image_file": temp_files + local_reference_files,
         "_temp_files": temp_files,

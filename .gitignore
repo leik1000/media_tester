@@ -10,6 +10,7 @@ media_tester_config.db
 *_test_result.png
 uploads/
 downloads/
+data/
 .venv/
 venv/
 env/

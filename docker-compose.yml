@@ -1,0 +1,10 @@
+services:
+  media-tester:
+    build: .
+    container_name: media-tester
+    ports:
+      - "5800:5800"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./data:/app/data
+    restart: unless-stopped

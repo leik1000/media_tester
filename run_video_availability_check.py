@@ -272,6 +272,12 @@ def build_payload(settings: dict[str, Any]) -> dict[str, Any]:
         payload["seconds"] = settings["seconds"]
     if settings.get("resolution"):
         payload["resolution"] = settings["resolution"]
+    if settings.get("start_frame"):
+        payload["start_frame"] = settings["start_frame"]
+    if settings.get("end_frame"):
+        payload["end_frame"] = settings["end_frame"]
+    if settings.get("video_reference"):
+        payload["video_reference"] = settings["video_reference"]
 
     references = resolve_reference_images(settings)
     if references:

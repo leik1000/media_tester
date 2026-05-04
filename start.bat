@@ -25,8 +25,8 @@ if errorlevel 1 (
 )
 
 echo [start] Launching Media Tester Web UI...
-start http://127.0.0.1:7860
-"%PYTHON_EXE%" -m uvicorn app:app --host 127.0.0.1 --port 7860
+start http://127.0.0.1:5800
+"%PYTHON_EXE%" -m uvicorn app:app --host 0.0.0.0 --port 5800
 
 if errorlevel 1 (
     echo [error] Media Tester exited with an error.

@@ -13,9 +13,20 @@ Or manually via terminal:
 ```bash
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\uvicorn app:app --host 127.0.0.1 --port 7860
+.venv\Scripts\uvicorn app:app --host 0.0.0.0 --port 5800
 ```
-Then open `http://127.0.0.1:7860` in your browser.
+Then open `http://127.0.0.1:5800` in your browser.
+
+Docker:
+
+```bash
+docker compose up -d --build
+```
+
+Then open `http://server-ip:5800`.
+
+Generated assets are saved under `downloads/`. Runtime settings, including API keys, are saved in `data/config.db`.
+The Compose file mounts `./downloads` and `./data` so generated assets and settings persist after container restarts.
 
 Files:
 
@@ -26,5 +37,5 @@ Files:
 
 Notes:
 
-- Configurations are auto-saved in your browser's local storage.
+- Configurations are auto-saved to the server-side SQLite database at `data/config.db`.
 - For `gpt-image-2`, leave reference images empty for text-to-image. Add image URLs to test image-to-image via `/v1/images/edits`.
