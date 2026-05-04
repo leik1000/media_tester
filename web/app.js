@@ -334,6 +334,14 @@ const app = createApp({
             }
         };
 
+        const formatCompletionTime = (item) => {
+            if (!item || item.status !== 'completed' || !item.createdAt) return '';
+            const value = String(item.createdAt).trim();
+            const match = value.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})(?::\d{2})?/);
+            if (match) return `${match[2]}-${match[3]} ${match[4]}`;
+            return value;
+        };
+
         const closePreview = () => {
             selectedResult.value = null;
         };
@@ -543,7 +551,7 @@ const app = createApp({
             openPreview, closePreview, toggleLogs, closeLogs, clearResults,
             nextPage, prevPage,
             submitTask,
-            currentLogs, currentResult, formatJson
+            currentLogs, currentResult, formatJson, formatCompletionTime
         };
     }
 });
