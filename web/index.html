@@ -226,16 +226,7 @@
                             <div class="flex-1">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">比例</label>
                                 <select class="glass-input text-sm appearance-none" v-model="image.aspectRatio">
-                                    <option class="bg-gray-900">16:9</option>
-                                    <option class="bg-gray-900">9:16</option>
-                                    <option class="bg-gray-900">1:1</option>
-                                    <option class="bg-gray-900">4:3</option>
-                                    <option class="bg-gray-900">3:4</option>
-                                    <option class="bg-gray-900">5:4</option>
-                                    <option class="bg-gray-900">4:5</option>
-                                    <option class="bg-gray-900">3:2</option>
-                                    <option class="bg-gray-900">2:3</option>
-                                    <option class="bg-gray-900">21:9</option>
+                                    <option v-for="ratio in imageAspectRatios" :key="ratio" class="bg-gray-900" :value="ratio">{{ ratio }}</option>
                                 </select>
                             </div>
                             <div class="flex-1">

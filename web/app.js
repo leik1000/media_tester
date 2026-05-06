@@ -51,6 +51,19 @@ const VIDEO_MODEL_CAPS = {
     },
 };
 
+const BASE_IMAGE_RATIOS = ['1:1', '4:3', '3:4', '5:4', '4:5', '3:2', '2:3', '16:9', '9:16', '21:9'];
+const IMAGE_MODEL_CAPS = {
+    'gemini-3-pro-image-preview': {
+        ratios: ['auto', ...BASE_IMAGE_RATIOS],
+    },
+    'gemini-3.1-flash-image-preview': {
+        ratios: ['auto', ...BASE_IMAGE_RATIOS, '1:4', '4:1', '1:8', '8:1'],
+    },
+    'gpt-image-2': {
+        ratios: BASE_IMAGE_RATIOS,
+    },
+};
+
 const app = createApp({
     setup() {
         const tab = ref('image');
@@ -133,11 +146,19 @@ const app = createApp({
         });
 
         const videoModelOptions = Object.keys(VIDEO_MODEL_CAPS);
+        const currentImageCapability = computed(() => IMAGE_MODEL_CAPS[image.model] || IMAGE_MODEL_CAPS['gemini-3-pro-image-preview']);
+        const imageAspectRatios = computed(() => currentImageCapability.value.ratios);
         const currentVideoCapability = computed(() => VIDEO_MODEL_CAPS[video.model] || VIDEO_MODEL_CAPS.sora2);
         const videoDurationOptions = computed(() => currentVideoCapability.value.durations || []);
         const videoDurationRange = computed(() => currentVideoCapability.value.durationRange || null);
         const videoDurationMin = computed(() => videoDurationRange.value ? videoDurationRange.value[0] : null);
         const videoDurationMax = computed(() => videoDurationRange.value ? videoDurationRange.value[1] : null);
+
+        const normalizeImageSettings = () => {
+            if (!IMAGE_MODEL_CAPS[image.model]) image.model = 'gemini-3-pro-image-preview';
+            const cap = currentImageCapability.value;
+            if (!cap.ratios.includes(image.aspectRatio)) image.aspectRatio = cap.ratios[0];
+        };
 
         const normalizeVideoSettings = () => {
             if (!VIDEO_MODEL_CAPS[video.model]) video.model = 'sora2';
@@ -249,6 +270,7 @@ const app = createApp({
             }
             Object.assign(image, savedData.image || {});
             Object.assign(video, savedData.video || {});
+            normalizeImageSettings();
             normalizeVideoSettings();
         };
 
@@ -326,6 +348,7 @@ const app = createApp({
         }, { deep: true });
 
         watch(() => video.model, normalizeVideoSettings);
+        watch(() => image.model, normalizeImageSettings);
 
         const scrollLogs = () => {
             const logContainer = document.querySelector('.overflow-auto.font-mono');
@@ -685,7 +708,7 @@ const app = createApp({
             tab, isLoading, isSubmitting,
             authChecked, isAuthenticated, loginForm, authMessage, authSettings,
             config, image, video,
-            videoModelOptions, currentVideoCapability, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
+            videoModelOptions, currentImageCapability, imageAspectRatios, currentVideoCapability, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
             imageFiles, videoFiles, imageReferenceCount, videoReferenceCount,
             onImageFilesChange, onVideoFilesChange,
             onResultDragStart, onReferenceDrop,

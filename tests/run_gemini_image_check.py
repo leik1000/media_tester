@@ -24,7 +24,23 @@ MODEL_OPTIONS = [
     "gemini-3.1-flash-image-preview",
     "gpt-image-2",
 ]
-ASPECT_RATIO_OPTIONS = ["1:1", "4:3", "3:4", "5:4", "4:5", "3:2", "2:3", "16:9", "9:16", "21:9"]
+ASPECT_RATIO_OPTIONS = [
+    "auto",
+    "1:1",
+    "4:3",
+    "3:4",
+    "5:4",
+    "4:5",
+    "3:2",
+    "2:3",
+    "16:9",
+    "9:16",
+    "21:9",
+    "1:4",
+    "4:1",
+    "1:8",
+    "8:1",
+]
 IMAGE_SIZE_OPTIONS = ["1K", "2K", "4K"]
 OPENAI_IMAGE_MODELS = {"gpt-image-2"}
 OPENAI_QUALITY_OPTIONS = ["low", "medium", "high"]
