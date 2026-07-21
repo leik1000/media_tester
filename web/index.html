@@ -116,7 +116,7 @@
                 </div>
                 <p v-if="authMessage" class="rounded-lg border border-red-400/20 bg-red-950/30 px-3 py-2 text-sm text-red-100">{{ authMessage }}</p>
                 <button type="submit" class="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">登录</button>
-                <p class="text-center text-xs text-gray-500">默认账号：admin / admin，登录后可在左侧修改。</p>
+                <p class="text-center text-xs text-gray-500">默认账号：admin / admin，登录后可在右上角系统配置中修改。</p>
             </form>
         </div>
         
@@ -126,9 +126,13 @@
                 <svg class="h-6 w-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"></path></svg>
                 媒体测试工具
             </h1>
-            <div class="flex gap-2">
+            <div class="flex items-center gap-2">
                 <button @click="tab = 'image'" :class="['tab-btn', tab === 'image' ? 'active' : '']">图片生成</button>
                 <button @click="tab = 'video'" :class="['tab-btn', tab === 'video' ? 'active' : '']">视频生成</button>
+                <button @click="openSystemConfig" class="ml-1 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-medium text-gray-300 transition hover:bg-white/10 hover:text-white">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    系统配置
+                </button>
                 <button @click="toggleLogs" class="ml-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-medium text-gray-300 transition hover:bg-white/10 hover:text-white" :class="showLogs ? 'border-indigo-300/30 bg-indigo-500/15 text-indigo-100' : ''">
                     日志
                 </button>
@@ -143,51 +147,6 @@
             
             <!-- Left Sidebar (Config) -->
             <aside class="glass-panel relative z-10 flex w-[348px] shrink-0 flex-col gap-3 overflow-y-auto border-y-0 border-l-0 p-4 shadow-[4px_0_24px_rgba(0,0,0,0.2)] xl:w-[370px]">
-                <!-- Global Settings -->
-                <div class="space-y-2.5">
-                    <h2 class="text-xs font-bold uppercase tracking-widest text-indigo-400 flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        接口设置
-                    </h2>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-400 mb-1.5">接口地址</label>
-                        <input type="text" class="glass-input text-sm" v-model="config.baseUrl" placeholder="https://api.pixellelabs.com">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-400 mb-1.5">代理地址</label>
-                        <input type="text" class="glass-input text-sm" v-model="config.proxyUrl" placeholder="例如 http://127.0.0.1:10808">
-                    </div>
-                    <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-xs font-medium text-gray-300">
-                        <input type="checkbox" v-model="config.enableProxy" class="h-4 w-4 accent-indigo-500">
-                        <span>启用代理</span>
-                    </label>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-400 mb-1.5">公共 API Key</label>
-                        <input type="password" class="glass-input text-sm" v-model="config.defaultApiKey" placeholder="模型 Key 为空时使用">
-                    </div>
-                </div>
-
-                <div class="h-px bg-white/10 w-full"></div>
-
-                <div class="space-y-2.5">
-                    <h2 class="text-xs font-bold uppercase tracking-widest text-indigo-400 flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                        登录设置
-                    </h2>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-400 mb-1.5">登录用户名</label>
-                        <input type="text" class="glass-input text-sm" v-model="authSettings.username" autocomplete="username">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-400 mb-1.5">新密码</label>
-                        <input type="password" class="glass-input text-sm" v-model="authSettings.newPassword" autocomplete="new-password" placeholder="不改可留空">
-                    </div>
-                    <button @click="updateAuth" type="button" class="w-full rounded-lg border border-indigo-300/20 bg-indigo-500/15 px-3 py-2 text-xs font-semibold text-indigo-100 transition hover:bg-indigo-500/25">保存登录设置</button>
-                    <p v-if="authSettings.message" class="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-gray-300">{{ authSettings.message }}</p>
-                </div>
-
-                <div class="h-px bg-white/10 w-full"></div>
-
                 <!-- Tab Specific Settings -->
                 <!-- IMAGE CONFIG -->
                 <transition name="fade" mode="out-in">
@@ -207,15 +166,15 @@
                         <div class="rounded-xl border border-white/10 bg-white/[0.025] p-2.5">
                             <div v-if="image.model === 'gpt-image-2'">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">gpt-image-2 Key</label>
-                                <input type="password" class="glass-input text-sm" v-model="config.gptImage2ApiKey" placeholder="公共 API Key">
+                                <input type="password" class="glass-input text-sm" v-model="config.gptImage2ApiKey" placeholder="此模型 API Key">
                             </div>
                             <div v-else-if="image.model === 'gemini-3-pro-image-preview'">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">gemini-3-pro-image-preview Key</label>
-                                <input type="password" class="glass-input text-sm" v-model="config.gemini3ProImageApiKey" placeholder="公共 API Key">
+                                <input type="password" class="glass-input text-sm" v-model="config.gemini3ProImageApiKey" placeholder="此模型 API Key">
                             </div>
                             <div v-else-if="image.model === 'gemini-3.1-flash-image-preview'">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">gemini-3.1-flash-image-preview Key</label>
-                                <input type="password" class="glass-input text-sm" v-model="config.gemini31FlashImageApiKey" placeholder="公共 API Key">
+                                <input type="password" class="glass-input text-sm" v-model="config.gemini31FlashImageApiKey" placeholder="此模型 API Key">
                             </div>
                         </div>
                         <div>
@@ -282,8 +241,8 @@
                             </select>
                         </div>
                         <div class="rounded-xl border border-white/10 bg-white/[0.025] p-2.5">
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">视频模型 Key</label>
-                            <input type="password" class="glass-input text-sm" v-model="config.videoApiKey" placeholder="公共 API Key">
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">{{ video.model }} Key</label>
+                            <input type="password" class="glass-input text-sm" v-model="config.videoApiKeys[video.model]" placeholder="此模型 API Key">
                         </div>
                         <div>
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">提示词</label>
@@ -541,6 +500,54 @@
                 </transition>
             </section>
         </main>
+
+        <!-- System Config Modal -->
+        <transition name="fade">
+            <div v-if="showSystemConfig" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl" @click.self="closeSystemConfig">
+                <form @submit.prevent="saveSystemConfig" class="glass-panel w-full max-w-lg overflow-hidden rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.6)]">
+                    <div class="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
+                        <div>
+                            <h3 class="text-base font-semibold text-white">系统配置</h3>
+                            <p class="mt-1 text-xs text-gray-500">登录、接口与代理</p>
+                        </div>
+                        <button type="button" @click="closeSystemConfig" class="flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                    <div class="space-y-4 p-5">
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">登录用户名</label>
+                                <input type="text" class="glass-input text-sm" v-model="authSettings.username" autocomplete="username">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">新密码</label>
+                                <input type="password" class="glass-input text-sm" v-model="authSettings.newPassword" autocomplete="new-password" placeholder="不改可留空">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">接口地址</label>
+                            <input type="text" class="glass-input text-sm" v-model="config.baseUrl" placeholder="https://api.pixellelabs.com">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">代理地址</label>
+                            <input type="text" class="glass-input text-sm" v-model="config.proxyUrl" placeholder="例如 http://127.0.0.1:10808">
+                        </div>
+                        <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-xs font-medium text-gray-300">
+                            <input type="checkbox" v-model="config.enableProxy" class="h-4 w-4 accent-indigo-500">
+                            <span>启用代理</span>
+                        </label>
+                        <p v-if="systemSettings.message" class="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-gray-300">{{ systemSettings.message }}</p>
+                    </div>
+                    <div class="flex justify-end gap-2 border-t border-white/10 px-5 py-4">
+                        <button type="button" @click="closeSystemConfig" class="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-white/10 hover:text-white">关闭</button>
+                        <button type="submit" :disabled="systemSettings.saving" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
+                            {{ systemSettings.saving ? '保存中...' : '保存配置' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </transition>
     </div>
 
     <style>
@@ -549,6 +556,6 @@
         @keyframes shimmer { 100% { transform: translateX(100%); } }
         @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
-    <script src="/static/app.js?v=20260504-server-pagination-filter"></script>
+    <script src="/static/app.js?v=20260722-system-config"></script>
 </body>
 </html>

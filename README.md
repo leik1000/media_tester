@@ -22,7 +22,7 @@ Default login:
 - Username: `admin`
 - Password: `admin`
 
-Change the login username/password from the left sidebar after signing in.
+Change the login username/password from the system configuration button in the top-right corner after signing in.
 
 Docker:
 

@@ -73,6 +73,7 @@ const app = createApp({
         const results = ref([]);
         const selectedResult = ref(null);
         const showLogs = ref(false);
+        const showSystemConfig = ref(false);
         const configLoaded = ref(false);
         const authChecked = ref(false);
         const isAuthenticated = ref(false);
@@ -104,11 +105,10 @@ const app = createApp({
             baseUrl: 'https://api.pixellelabs.com',
             enableProxy: true,
             proxyUrl: 'http://127.0.0.1:10808',
-            defaultApiKey: '',
             gptImage2ApiKey: '',
             gemini3ProImageApiKey: '',
             gemini31FlashImageApiKey: '',
-            videoApiKey: ''
+            videoApiKeys: Object.fromEntries(Object.keys(VIDEO_MODEL_CAPS).map(model => [model, '']))
         });
 
         const loginForm = reactive({
@@ -119,6 +119,11 @@ const app = createApp({
         const authSettings = reactive({
             username: 'admin',
             newPassword: '',
+            message: '',
+        });
+
+        const systemSettings = reactive({
+            saving: false,
             message: '',
         });
 
@@ -236,6 +241,7 @@ const app = createApp({
             activePolls.clear();
             isAuthenticated.value = false;
             configLoaded.value = false;
+            showSystemConfig.value = false;
             results.value = [];
             currentResult.value = null;
             currentLogs.value = [];
@@ -243,30 +249,83 @@ const app = createApp({
 
         const updateAuth = async () => {
             authSettings.message = '';
+            const res = await fetch('/api/auth/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: authSettings.username,
+                    password: authSettings.newPassword,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message || '保存登录配置失败');
+            authSettings.username = data.username || authSettings.username;
+            loginForm.username = authSettings.username;
+            authSettings.newPassword = '';
+            authSettings.message = '登录配置已保存。';
+            return data;
+        };
+
+        const openSystemConfig = () => {
+            systemSettings.message = '';
+            showSystemConfig.value = true;
+        };
+
+        const closeSystemConfig = () => {
+            showSystemConfig.value = false;
+        };
+
+        const serializeConfig = () => ({
+            baseUrl: config.baseUrl,
+            enableProxy: config.enableProxy,
+            proxyUrl: config.proxyUrl,
+            gptImage2ApiKey: config.gptImage2ApiKey,
+            gemini3ProImageApiKey: config.gemini3ProImageApiKey,
+            gemini31FlashImageApiKey: config.gemini31FlashImageApiKey,
+            videoApiKeys: { ...config.videoApiKeys },
+        });
+
+        const saveCurrentConfig = async () => {
+            clearTimeout(saveConfigTimer);
+            const payload = JSON.stringify({ config: serializeConfig(), image, video });
+            const res = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.message || '保存配置失败');
+            }
+        };
+
+        const saveSystemConfig = async () => {
+            systemSettings.saving = true;
+            systemSettings.message = '';
             try {
-                const res = await fetch('/api/auth/update', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: authSettings.username,
-                        password: authSettings.newPassword,
-                    }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.message || '保存登录配置失败');
-                authSettings.username = data.username || authSettings.username;
-                loginForm.username = authSettings.username;
-                authSettings.newPassword = '';
-                authSettings.message = '登录配置已保存。';
+                await saveCurrentConfig();
+                await updateAuth();
+                systemSettings.message = '系统配置已保存。';
             } catch (e) {
-                authSettings.message = e.message || '保存登录配置失败';
+                systemSettings.message = e.message || '保存系统配置失败';
+            } finally {
+                systemSettings.saving = false;
             }
         };
 
         const applySavedConfig = (savedData) => {
-            Object.assign(config, savedData.config || {});
-            if (!config.defaultApiKey && savedData.config?.apiKey) {
-                config.defaultApiKey = savedData.config.apiKey;
+            const savedConfig = savedData.config || {};
+            ['baseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey'].forEach(key => {
+                if (Object.prototype.hasOwnProperty.call(savedConfig, key)) {
+                    config[key] = savedConfig[key];
+                }
+            });
+            if (savedConfig.videoApiKeys && typeof savedConfig.videoApiKeys === 'object' && !Array.isArray(savedConfig.videoApiKeys)) {
+                Object.keys(VIDEO_MODEL_CAPS).forEach(model => {
+                    if (Object.prototype.hasOwnProperty.call(savedConfig.videoApiKeys, model)) {
+                        config.videoApiKeys[model] = savedConfig.videoApiKeys[model] || '';
+                    }
+                });
             }
             Object.assign(image, savedData.image || {});
             Object.assign(video, savedData.video || {});
@@ -336,14 +395,9 @@ const app = createApp({
 
         watch([config, image, video], () => {
             if (!configLoaded.value || !isAuthenticated.value) return;
-            const payload = JSON.stringify({ config, image, video });
             clearTimeout(saveConfigTimer);
             saveConfigTimer = setTimeout(() => {
-                fetch('/api/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: payload,
-                }).catch(e => console.error('保存数据库配置失败', e));
+                saveCurrentConfig().catch(e => console.error('保存数据库配置失败', e));
             }, 400);
         }, { deep: true });
 
@@ -381,10 +435,10 @@ const app = createApp({
                 'gemini-3-pro-image-preview': config.gemini3ProImageApiKey,
                 'gemini-3.1-flash-image-preview': config.gemini31FlashImageApiKey,
             };
-            return keyByModel[model] || config.defaultApiKey || '';
+            return keyByModel[model] || '';
         };
 
-        const resolveVideoApiKey = () => config.videoApiKey || config.defaultApiKey || '';
+        const resolveVideoApiKey = (model) => config.videoApiKeys[model] || '';
 
         const appendCommonTaskFields = (formData, source, apiKey, options = {}) => {
             formData.append('base_url', config.baseUrl);
@@ -600,7 +654,7 @@ const app = createApp({
                     }
                 }
                 const payload = new FormData();
-                appendCommonTaskFields(payload, video, resolveVideoApiKey(), { includeReferences: !usingStartEnd });
+                appendCommonTaskFields(payload, video, resolveVideoApiKey(video.model), { includeReferences: !usingStartEnd });
                 payload.append('duration', video.duration);
                 payload.append('resolution', video.resolution);
                 payload.append('create_path', video.createPath);
@@ -706,14 +760,14 @@ const app = createApp({
 
         return {
             tab, isLoading, isSubmitting,
-            authChecked, isAuthenticated, loginForm, authMessage, authSettings,
+            authChecked, isAuthenticated, loginForm, authMessage, authSettings, systemSettings,
             config, image, video,
             videoModelOptions, currentImageCapability, imageAspectRatios, currentVideoCapability, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
             imageFiles, videoFiles, imageReferenceCount, videoReferenceCount,
             onImageFilesChange, onVideoFilesChange,
             onResultDragStart, onReferenceDrop,
-            results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, showLogs,
-            openPreview, closePreview, toggleLogs, closeLogs, refreshTaskList, setGalleryFilter,
+            results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, showLogs, showSystemConfig,
+            openPreview, closePreview, toggleLogs, closeLogs, openSystemConfig, closeSystemConfig, saveSystemConfig, refreshTaskList, setGalleryFilter,
             submitLogin, logout, updateAuth,
             nextPage, prevPage,
             submitTask,
