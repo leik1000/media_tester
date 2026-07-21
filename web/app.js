@@ -1,5 +1,14 @@
 const { createApp, ref, reactive, watch, onMounted, computed } = Vue;
 
+const rawFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+    const res = await rawFetch(...args);
+    if (res.status === 401 && window.location.pathname !== '/login') {
+        window.location.href = '/login';
+    }
+    return res;
+};
+
 const VIDEO_MODEL_CAPS = {
     'kling-video-3.0': {
         ratios: ['1:1', '16:9', '9:16'],
@@ -75,9 +84,6 @@ const app = createApp({
         const showLogs = ref(false);
         const showSystemConfig = ref(false);
         const configLoaded = ref(false);
-        const authChecked = ref(false);
-        const isAuthenticated = ref(false);
-        const authMessage = ref('');
         const currentPage = ref(1);
         const totalItems = ref(0);
         const totalPages = ref(1);
@@ -109,11 +115,6 @@ const app = createApp({
             gemini3ProImageApiKey: '',
             gemini31FlashImageApiKey: '',
             videoApiKeys: Object.fromEntries(Object.keys(VIDEO_MODEL_CAPS).map(model => [model, '']))
-        });
-
-        const loginForm = reactive({
-            username: 'admin',
-            password: '',
         });
 
         const authSettings = reactive({
@@ -188,50 +189,28 @@ const app = createApp({
         };
 
         onMounted(async () => {
-            await checkAuth();
-            authChecked.value = true;
-            if (!isAuthenticated.value) return;
+            const authenticated = await loadAuthStatus();
+            if (!authenticated) return;
             await loadSavedConfig();
             configLoaded.value = true;
             await loadPersistedTasks();
         });
 
-        const checkAuth = async () => {
+        const loadAuthStatus = async () => {
             try {
                 const res = await fetch('/api/auth/status');
                 const data = await res.json();
-                isAuthenticated.value = !!data.authenticated;
+                if (!res.ok || !data.authenticated) {
+                    window.location.href = '/login';
+                    return false;
+                }
                 if (data.username) {
-                    loginForm.username = data.username;
                     authSettings.username = data.username;
                 }
+                return true;
             } catch (e) {
-                isAuthenticated.value = false;
-            }
-        };
-
-        const initializeAfterLogin = async () => {
-            await loadSavedConfig();
-            configLoaded.value = true;
-            await loadPersistedTasks();
-        };
-
-        const submitLogin = async () => {
-            authMessage.value = '';
-            try {
-                const res = await fetch('/api/auth/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(loginForm),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.message || '登录失败');
-                isAuthenticated.value = true;
-                authSettings.username = data.username || loginForm.username;
-                loginForm.password = '';
-                await initializeAfterLogin();
-            } catch (e) {
-                authMessage.value = e.message || '登录失败';
+                window.location.href = '/login';
+                return false;
             }
         };
 
@@ -239,12 +218,12 @@ const app = createApp({
             await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
             activePolls.forEach(interval => clearInterval(interval));
             activePolls.clear();
-            isAuthenticated.value = false;
             configLoaded.value = false;
             showSystemConfig.value = false;
             results.value = [];
             currentResult.value = null;
             currentLogs.value = [];
+            window.location.href = '/login';
         };
 
         const updateAuth = async () => {
@@ -260,7 +239,6 @@ const app = createApp({
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || '保存登录配置失败');
             authSettings.username = data.username || authSettings.username;
-            loginForm.username = authSettings.username;
             authSettings.newPassword = '';
             authSettings.message = '登录配置已保存。';
             return data;
@@ -394,7 +372,7 @@ const app = createApp({
         };
 
         watch([config, image, video], () => {
-            if (!configLoaded.value || !isAuthenticated.value) return;
+            if (!configLoaded.value) return;
             clearTimeout(saveConfigTimer);
             saveConfigTimer = setTimeout(() => {
                 saveCurrentConfig().catch(e => console.error('保存数据库配置失败', e));
@@ -760,7 +738,7 @@ const app = createApp({
 
         return {
             tab, isLoading, isSubmitting,
-            authChecked, isAuthenticated, loginForm, authMessage, authSettings, systemSettings,
+            authSettings, systemSettings,
             config, image, video,
             videoModelOptions, currentImageCapability, imageAspectRatios, currentVideoCapability, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
             imageFiles, videoFiles, imageReferenceCount, videoReferenceCount,
@@ -768,7 +746,7 @@ const app = createApp({
             onResultDragStart, onReferenceDrop,
             results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, showLogs, showSystemConfig,
             openPreview, closePreview, toggleLogs, closeLogs, openSystemConfig, closeSystemConfig, saveSystemConfig, refreshTaskList, setGalleryFilter,
-            submitLogin, logout, updateAuth,
+            logout, updateAuth,
             nextPage, prevPage,
             submitTask,
             currentLogs, currentResult, formatJson, formatTaskDuration

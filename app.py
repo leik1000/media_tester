@@ -13,7 +13,7 @@ from typing import Dict, Any
 from urllib.parse import urlparse, unquote
 
 from fastapi import FastAPI, Request, BackgroundTasks, Query
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import requests
 
@@ -213,7 +213,7 @@ ensure_auth_config()
 @app.middleware("http")
 async def require_login(request: Request, call_next):
     path = request.url.path
-    public_paths = {"/", "/api/auth/status", "/api/auth/login"}
+    public_paths = {"/", "/login", "/api/auth/status", "/api/auth/login"}
     if path in public_paths or path.startswith("/static/"):
         return await call_next(request)
     if not is_authenticated(request):
@@ -574,8 +574,17 @@ def save_video_asset(media_url: str, settings: dict[str, Any]) -> dict[str, Any]
     }
 
 @app.get("/")
-def read_root():
+def read_root(request: Request):
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login")
     return FileResponse("web/index.html")
+
+
+@app.get("/login")
+def read_login(request: Request):
+    if is_authenticated(request):
+        return RedirectResponse(url="/")
+    return FileResponse("web/login.html")
 
 
 @app.get("/api/auth/status")
