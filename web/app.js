@@ -82,6 +82,15 @@ const app = createApp({
         const results = ref([]);
         const selectedResult = ref(null);
         const previewImageScale = ref(1);
+        const previewImagePan = reactive({ x: 0, y: 0 });
+        const previewImageDrag = reactive({
+            active: false,
+            pointerId: null,
+            startX: 0,
+            startY: 0,
+            startPanX: 0,
+            startPanY: 0,
+        });
         const previewImageTransformOrigin = ref('center center');
         const showLogs = ref(false);
         const showSystemConfig = ref(false);
@@ -109,8 +118,11 @@ const app = createApp({
         const imageReferenceCount = computed(() => countReferenceUrls(image.imageUrls) + imageFiles.value.length);
         const videoReferenceCount = computed(() => countReferenceUrls(video.imageUrls) + videoFiles.value.length);
         const previewImageStyle = computed(() => ({
-            transform: `scale(${previewImageScale.value})`,
+            transform: `translate3d(${previewImagePan.x}px, ${previewImagePan.y}px, 0) scale(${previewImageScale.value})`,
             transformOrigin: previewImageTransformOrigin.value,
+            cursor: previewImageScale.value > 1 ? (previewImageDrag.active ? 'grabbing' : 'grab') : 'zoom-in',
+            transition: previewImageDrag.active ? 'none' : 'transform 100ms ease-out',
+            userSelect: 'none',
         }));
 
         const config = reactive({
@@ -505,11 +517,19 @@ const app = createApp({
             return item;
         };
 
+        const resetPreviewImageTransform = () => {
+            previewImageScale.value = 1;
+            previewImagePan.x = 0;
+            previewImagePan.y = 0;
+            previewImageDrag.active = false;
+            previewImageDrag.pointerId = null;
+            previewImageTransformOrigin.value = 'center center';
+        };
+
         const openPreview = (item) => {
             currentResult.value = item;
             currentLogs.value = item.logs || [];
-            previewImageScale.value = 1;
-            previewImageTransformOrigin.value = 'center center';
+            resetPreviewImageTransform();
             if ((item.status === 'completed' && item.url) || item.status === 'error' || item.status === 'failed') {
                 selectedResult.value = item;
             }
@@ -528,6 +548,38 @@ const app = createApp({
             const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
             const nextScale = previewImageScale.value * factor;
             previewImageScale.value = Math.round(Math.min(5, Math.max(0.5, nextScale)) * 100) / 100;
+            if (previewImageScale.value <= 1) {
+                previewImagePan.x = 0;
+                previewImagePan.y = 0;
+                previewImageDrag.active = false;
+                previewImageDrag.pointerId = null;
+            }
+        };
+
+        const startPreviewImageDrag = (event) => {
+            if (selectedResult.value?.type !== 'image' || previewImageScale.value <= 1) return;
+            event.preventDefault();
+            previewImageDrag.active = true;
+            previewImageDrag.pointerId = event.pointerId;
+            previewImageDrag.startX = event.clientX;
+            previewImageDrag.startY = event.clientY;
+            previewImageDrag.startPanX = previewImagePan.x;
+            previewImageDrag.startPanY = previewImagePan.y;
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+        };
+
+        const movePreviewImageDrag = (event) => {
+            if (!previewImageDrag.active || previewImageDrag.pointerId !== event.pointerId) return;
+            event.preventDefault();
+            previewImagePan.x = previewImageDrag.startPanX + event.clientX - previewImageDrag.startX;
+            previewImagePan.y = previewImageDrag.startPanY + event.clientY - previewImageDrag.startY;
+        };
+
+        const endPreviewImageDrag = (event) => {
+            if (!previewImageDrag.active || previewImageDrag.pointerId !== event.pointerId) return;
+            event.currentTarget.releasePointerCapture?.(event.pointerId);
+            previewImageDrag.active = false;
+            previewImageDrag.pointerId = null;
         };
 
         const formatJson = (value) => {
@@ -551,8 +603,7 @@ const app = createApp({
 
         const closePreview = () => {
             selectedResult.value = null;
-            previewImageScale.value = 1;
-            previewImageTransformOrigin.value = 'center center';
+            resetPreviewImageTransform();
         };
 
         const toggleLogs = () => {
@@ -770,7 +821,7 @@ const app = createApp({
             onResultDragStart, onReferenceDrop,
             results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, previewImageStyle, showLogs, showSystemConfig,
             openPreview, closePreview, toggleLogs, closeLogs, openSystemConfig, closeSystemConfig, saveSystemConfig, refreshTaskList, setGalleryFilter,
-            onPreviewImageWheel,
+            onPreviewImageWheel, startPreviewImageDrag, movePreviewImageDrag, endPreviewImageDrag,
             logout, updateAuth,
             nextPage, prevPage,
             submitTask,

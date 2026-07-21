@@ -433,8 +433,8 @@
                                         <pre class="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-gray-300">{{ (selectedResult.logs || []).join('\n') || '无日志。' }}</pre>
                                     </div>
                                 </div>
-                                <div v-else-if="selectedResult.type === 'image'" @wheel.prevent="onPreviewImageWheel" class="flex max-h-[68vh] min-h-[260px] items-center justify-center overflow-auto rounded-2xl">
-                                    <img :src="selectedResult.url" :style="previewImageStyle" draggable="false" class="mx-auto max-h-[68vh] max-w-full rounded-2xl border border-white/10 object-contain shadow-2xl transition-transform duration-100 ease-out">
+                                <div v-else-if="selectedResult.type === 'image'" @wheel.prevent="onPreviewImageWheel" @pointerdown="startPreviewImageDrag" @pointermove="movePreviewImageDrag" @pointerup="endPreviewImageDrag" @pointercancel="endPreviewImageDrag" class="flex max-h-[68vh] min-h-[260px] touch-none items-center justify-center overflow-auto rounded-2xl">
+                                    <img :src="selectedResult.url" :style="previewImageStyle" draggable="false" class="mx-auto max-h-[68vh] max-w-full rounded-2xl border border-white/10 object-contain shadow-2xl">
                                 </div>
                                 <video v-else controls autoplay class="mx-auto max-h-[68vh] w-full rounded-2xl border border-white/10 bg-black shadow-2xl">
                                     <source :src="selectedResult.url" type="video/mp4">
