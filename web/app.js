@@ -81,6 +81,8 @@ const app = createApp({
         const currentResult = ref(null);
         const results = ref([]);
         const selectedResult = ref(null);
+        const previewImageScale = ref(1);
+        const previewImageTransformOrigin = ref('center center');
         const showLogs = ref(false);
         const showSystemConfig = ref(false);
         const configLoaded = ref(false);
@@ -106,6 +108,10 @@ const app = createApp({
             .length;
         const imageReferenceCount = computed(() => countReferenceUrls(image.imageUrls) + imageFiles.value.length);
         const videoReferenceCount = computed(() => countReferenceUrls(video.imageUrls) + videoFiles.value.length);
+        const previewImageStyle = computed(() => ({
+            transform: `scale(${previewImageScale.value})`,
+            transformOrigin: previewImageTransformOrigin.value,
+        }));
 
         const config = reactive({
             baseUrl: 'https://api.pixellelabs.com',
@@ -502,10 +508,26 @@ const app = createApp({
         const openPreview = (item) => {
             currentResult.value = item;
             currentLogs.value = item.logs || [];
+            previewImageScale.value = 1;
+            previewImageTransformOrigin.value = 'center center';
             if ((item.status === 'completed' && item.url) || item.status === 'error' || item.status === 'failed') {
                 selectedResult.value = item;
             }
             scrollLogs();
+        };
+
+        const onPreviewImageWheel = (event) => {
+            if (selectedResult.value?.type !== 'image') return;
+            const imageEl = event.currentTarget.querySelector('img');
+            if (imageEl) {
+                const rect = imageEl.getBoundingClientRect();
+                const x = rect.width ? ((event.clientX - rect.left) / rect.width) * 100 : 50;
+                const y = rect.height ? ((event.clientY - rect.top) / rect.height) * 100 : 50;
+                previewImageTransformOrigin.value = `${Math.min(100, Math.max(0, x))}% ${Math.min(100, Math.max(0, y))}%`;
+            }
+            const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+            const nextScale = previewImageScale.value * factor;
+            previewImageScale.value = Math.round(Math.min(5, Math.max(0.5, nextScale)) * 100) / 100;
         };
 
         const formatJson = (value) => {
@@ -529,6 +551,8 @@ const app = createApp({
 
         const closePreview = () => {
             selectedResult.value = null;
+            previewImageScale.value = 1;
+            previewImageTransformOrigin.value = 'center center';
         };
 
         const toggleLogs = () => {
@@ -744,8 +768,9 @@ const app = createApp({
             imageFiles, videoFiles, imageReferenceCount, videoReferenceCount,
             onImageFilesChange, onVideoFilesChange,
             onResultDragStart, onReferenceDrop,
-            results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, showLogs, showSystemConfig,
+            results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, previewImageStyle, showLogs, showSystemConfig,
             openPreview, closePreview, toggleLogs, closeLogs, openSystemConfig, closeSystemConfig, saveSystemConfig, refreshTaskList, setGalleryFilter,
+            onPreviewImageWheel,
             logout, updateAuth,
             nextPage, prevPage,
             submitTask,

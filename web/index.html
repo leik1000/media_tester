@@ -67,6 +67,9 @@
             box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
             background: rgba(0, 0, 0, 0.4);
         }
+        [v-cloak] {
+            display: none !important;
+        }
         .tab-btn {
             padding: 0.55rem 1.1rem;
             border-bottom: 2px solid transparent; 
@@ -92,7 +95,7 @@
     </style>
 </head>
 <body class="flex flex-col font-sans overflow-hidden">
-    <div id="app" class="flex h-screen max-h-screen min-h-0 flex-col overflow-hidden">
+    <div id="app" v-cloak class="flex h-screen max-h-screen min-h-0 flex-col overflow-hidden">
         <!-- Navbar -->
         <header class="glass-panel relative z-20 flex h-14 shrink-0 items-center justify-between border-b-0 px-5 shadow-2xl">
             <h1 class="flex items-center gap-3 bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-lg font-bold text-transparent">
@@ -430,7 +433,9 @@
                                         <pre class="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-gray-300">{{ (selectedResult.logs || []).join('\n') || '无日志。' }}</pre>
                                     </div>
                                 </div>
-                                <img v-else-if="selectedResult.type === 'image'" :src="selectedResult.url" class="mx-auto max-h-[68vh] max-w-full rounded-2xl border border-white/10 object-contain shadow-2xl">
+                                <div v-else-if="selectedResult.type === 'image'" @wheel.prevent="onPreviewImageWheel" class="flex max-h-[68vh] min-h-[260px] items-center justify-center overflow-auto rounded-2xl">
+                                    <img :src="selectedResult.url" :style="previewImageStyle" draggable="false" class="mx-auto max-h-[68vh] max-w-full rounded-2xl border border-white/10 object-contain shadow-2xl transition-transform duration-100 ease-out">
+                                </div>
                                 <video v-else controls autoplay class="mx-auto max-h-[68vh] w-full rounded-2xl border border-white/10 bg-black shadow-2xl">
                                     <source :src="selectedResult.url" type="video/mp4">
                                 </video>
