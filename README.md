@@ -6,6 +6,15 @@ Local web-based test tool for:
 - Gemini image generation
 - OpenAI Images API compatible `gpt-image-2` generation/editing
 
+Video models currently exposed in the UI include `kling-video-3.0`,
+`kling-video-o3-omni`, `sora2`, `sora-v3-pro`, `sora-v3-fast`, `veo31-fast`,
+and `gemini-omni-flash`.
+
+`gemini-omni-flash` supports `16:9` / `9:16`, durations `4` / `6` / `8` /
+`10` seconds, up to 5 reference images, and 1 reference video. The UI does not
+show or send a resolution parameter for this model; the service handles its
+output resolution internally.
+
 Run:
 
 Double click `start.bat` on Windows.

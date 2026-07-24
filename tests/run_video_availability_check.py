@@ -45,6 +45,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", type=int, help="Duration in seconds")
     parser.add_argument("--seconds", type=int, help="Alias for duration")
     parser.add_argument("--resolution", help="Optional resolution, for example 1080p")
+    parser.add_argument("--video-reference", help="Reference video URL")
+    parser.add_argument(
+        "--video-reference-field",
+        help="Request field used for reference video, for example reference_video",
+    )
     parser.add_argument(
         "--image-url",
         action="append",
@@ -171,6 +176,8 @@ def build_settings(args: argparse.Namespace) -> dict[str, Any]:
         "duration": DEFAULT_DURATION,
         "seconds": None,
         "resolution": None,
+        "video_reference": None,
+        "video_reference_field": "video_reference",
         "image_url": [],
         "image_file": [],
         "reference_field": "image_urls",
@@ -277,7 +284,10 @@ def build_payload(settings: dict[str, Any]) -> dict[str, Any]:
     if settings.get("end_frame"):
         payload["end_frame"] = settings["end_frame"]
     if settings.get("video_reference"):
-        payload["video_reference"] = settings["video_reference"]
+        video_reference_field = str(
+            settings.get("video_reference_field") or "video_reference"
+        ).strip() or "video_reference"
+        payload[video_reference_field] = settings["video_reference"]
 
     references = resolve_reference_images(settings)
     if references:

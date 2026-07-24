@@ -825,6 +825,7 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
         "start_frame": form_value(form, "start_frame"),
         "end_frame": form_value(form, "end_frame"),
         "video_reference": form_value(form, "video_reference"),
+        "video_reference_field": form_value(form, "video_reference_field") or "video_reference",
         "image_url": remote_urls,
         "image_file": temp_files + local_reference_files,
         "_temp_files": temp_files,

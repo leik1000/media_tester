@@ -231,7 +231,7 @@
                                     <option v-for="ratio in currentVideoCapability.ratios" :key="ratio" class="bg-gray-900" :value="ratio">{{ ratio }}</option>
                                 </select>
                             </div>
-                            <div class="flex-1">
+                            <div v-if="videoSupportsResolution" class="flex-1">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">分辨率</label>
                                 <select class="glass-input text-sm appearance-none" v-model="video.resolution">
                                     <option v-for="resolution in currentVideoCapability.resolutions" :key="resolution" class="bg-gray-900" :value="resolution">{{ resolution }}</option>

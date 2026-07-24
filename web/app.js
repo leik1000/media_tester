@@ -34,6 +34,16 @@ const VIDEO_MODEL_CAPS = {
         supportsStartEnd: false,
         supportsVideoReference: false,
     },
+    'gemini-omni-flash': {
+        ratios: ['16:9', '9:16'],
+        resolutions: [],
+        durations: [4, 6, 8, 10],
+        maxRefs: 5,
+        supportsStartEnd: false,
+        supportsVideoReference: true,
+        videoReferenceField: 'reference_video',
+        exposesResolution: false,
+    },
     'sora-v3-pro': {
         ratios: ['21:9', '1:1', '4:3', '3:4', '16:9', '9:16'],
         resolutions: ['480p', '720p'],
@@ -173,6 +183,7 @@ const app = createApp({
         const currentImageCapability = computed(() => IMAGE_MODEL_CAPS[image.model] || IMAGE_MODEL_CAPS['gemini-3-pro-image-preview']);
         const imageAspectRatios = computed(() => currentImageCapability.value.ratios);
         const currentVideoCapability = computed(() => VIDEO_MODEL_CAPS[video.model] || VIDEO_MODEL_CAPS.sora2);
+        const videoSupportsResolution = computed(() => currentVideoCapability.value.exposesResolution !== false);
         const videoDurationOptions = computed(() => currentVideoCapability.value.durations || []);
         const videoDurationRange = computed(() => currentVideoCapability.value.durationRange || null);
         const videoDurationMin = computed(() => videoDurationRange.value ? videoDurationRange.value[0] : null);
@@ -188,7 +199,12 @@ const app = createApp({
             if (!VIDEO_MODEL_CAPS[video.model]) video.model = 'sora2';
             const cap = currentVideoCapability.value;
             if (!cap.ratios.includes(video.aspectRatio)) video.aspectRatio = cap.ratios[0];
-            if (!cap.resolutions.includes(video.resolution)) video.resolution = cap.resolutions[0];
+            const resolutions = cap.resolutions || [];
+            if (videoSupportsResolution.value && resolutions.length && !resolutions.includes(video.resolution)) {
+                video.resolution = resolutions[0];
+            } else if (!videoSupportsResolution.value) {
+                video.resolution = '';
+            }
             if (cap.durations) {
                 const value = Number(video.duration);
                 if (!cap.durations.includes(value)) video.duration = cap.durations[0];
@@ -682,7 +698,9 @@ const app = createApp({
             normalizeVideoSettings();
             const cap = currentVideoCapability.value;
             const usingStartEnd = cap.supportsStartEnd && (String(video.startFrame || '').trim() || String(video.endFrame || '').trim());
-            const meta = `${video.duration}s · ${video.aspectRatio} · ${video.resolution}`;
+            const metaParts = [`${video.duration}s`, video.aspectRatio];
+            if (videoSupportsResolution.value && video.resolution) metaParts.push(video.resolution);
+            const meta = metaParts.join(' · ');
             const placeholder = createPlaceholder({
                 type: 'video',
                 model: video.model,
@@ -709,7 +727,9 @@ const app = createApp({
                 const payload = new FormData();
                 appendCommonTaskFields(payload, video, resolveVideoApiKey(video.model), { includeReferences: !usingStartEnd });
                 payload.append('duration', video.duration);
-                payload.append('resolution', video.resolution);
+                if (videoSupportsResolution.value && video.resolution) {
+                    payload.append('resolution', video.resolution);
+                }
                 payload.append('create_path', video.createPath);
                 payload.append('status_path', video.statusPath);
                 if (cap.supportsStartEnd) {
@@ -718,6 +738,7 @@ const app = createApp({
                 }
                 if (cap.supportsVideoReference && video.videoReference.trim()) {
                     payload.append('video_reference', video.videoReference.trim());
+                    payload.append('video_reference_field', cap.videoReferenceField || 'video_reference');
                 }
                 if (!usingStartEnd) {
                     videoFiles.value.forEach(file => payload.append('image_file', file));
@@ -815,7 +836,7 @@ const app = createApp({
             tab, isLoading, isSubmitting,
             authSettings, systemSettings,
             config, image, video,
-            videoModelOptions, currentImageCapability, imageAspectRatios, currentVideoCapability, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
+            videoModelOptions, currentImageCapability, imageAspectRatios, currentVideoCapability, videoSupportsResolution, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
             imageFiles, videoFiles, imageReferenceCount, videoReferenceCount,
             onImageFilesChange, onVideoFilesChange,
             onResultDragStart, onReferenceDrop,
