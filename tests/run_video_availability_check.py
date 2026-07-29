@@ -47,6 +47,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resolution", help="Optional resolution, for example 1080p")
     parser.add_argument("--video-reference", help="Reference video URL")
     parser.add_argument(
+        "--video-url",
+        action="append",
+        default=None,
+        help="Reference video URL, repeatable for Sora V3",
+    )
+    parser.add_argument(
+        "--audio-url",
+        action="append",
+        default=None,
+        help="Reference audio URL, repeatable for Sora V3",
+    )
+    parser.add_argument(
         "--video-reference-field",
         help="Request field used for reference video, for example reference_video",
     )
@@ -147,7 +159,7 @@ def coerce_config_value(key: str, value: str) -> Any:
         return float(value)
     if key in {"download_check", "skip_head_check", "print_payload"}:
         return value.strip().lower() in {"1", "true", "yes", "on"}
-    if key in {"image_url", "image_file", "extra_field"}:
+    if key in {"image_url", "image_file", "video_url", "audio_url", "extra_field"}:
         try:
             parsed = parse_json_value(value)
         except RuntimeError:
@@ -178,6 +190,9 @@ def build_settings(args: argparse.Namespace) -> dict[str, Any]:
         "resolution": None,
         "video_reference": None,
         "video_reference_field": "video_reference",
+        "video_url": [],
+        "audio_url": [],
+        "generate_audio": True,
         "image_url": [],
         "image_file": [],
         "reference_field": "image_urls",
@@ -215,6 +230,8 @@ def build_settings(args: argparse.Namespace) -> dict[str, Any]:
     ).strip()
     settings["image_url"] = list(settings.get("image_url") or [])
     settings["image_file"] = list(settings.get("image_file") or [])
+    settings["video_url"] = list(settings.get("video_url") or [])
+    settings["audio_url"] = list(settings.get("audio_url") or [])
     extra_field = settings.get("extra_field") or []
     if isinstance(extra_field, dict):
         settings["extra_field"] = [
@@ -260,7 +277,20 @@ def parse_extra_fields(items: list[str]) -> dict[str, Any]:
 def resolve_reference_images(settings: dict[str, Any]) -> list[str]:
     values = [str(item).strip() for item in settings["image_url"] if str(item).strip()]
     for file_path in settings["image_file"]:
+        if str(settings.get("model") or "").strip() in {"sora-v3-pro", "sora-v3-fast"}:
+            raise RuntimeError(
+                "Sora V3 local references must be published as HTTP(S) URLs before building the payload"
+            )
         values.append(local_file_to_data_url(str(file_path)))
+    return values
+
+
+def resolve_reference_urls(settings: dict[str, Any], key: str) -> list[str]:
+    values: list[str] = []
+    for item in settings.get(key) or []:
+        value = str(item or "").strip()
+        if value and value not in values:
+            values.append(value)
     return values
 
 
@@ -279,19 +309,32 @@ def build_payload(settings: dict[str, Any]) -> dict[str, Any]:
         payload["seconds"] = settings["seconds"]
     if settings.get("resolution"):
         payload["resolution"] = settings["resolution"]
-    if settings.get("start_frame"):
-        payload["start_frame"] = settings["start_frame"]
-    if settings.get("end_frame"):
-        payload["end_frame"] = settings["end_frame"]
-    if settings.get("video_reference"):
-        video_reference_field = str(
-            settings.get("video_reference_field") or "video_reference"
-        ).strip() or "video_reference"
-        payload[video_reference_field] = settings["video_reference"]
+    is_sora_v3 = str(settings.get("model") or "").strip() in {
+        "sora-v3-pro",
+        "sora-v3-fast",
+    }
+    if not is_sora_v3:
+        if settings.get("start_frame"):
+            payload["start_frame"] = settings["start_frame"]
+        if settings.get("end_frame"):
+            payload["end_frame"] = settings["end_frame"]
+        if settings.get("video_reference"):
+            video_reference_field = str(
+                settings.get("video_reference_field") or "video_reference"
+            ).strip() or "video_reference"
+            payload[video_reference_field] = settings["video_reference"]
 
     references = resolve_reference_images(settings)
     if references:
         payload["image_urls"] = references
+    if is_sora_v3:
+        video_urls = resolve_reference_urls(settings, "video_url")
+        audio_urls = resolve_reference_urls(settings, "audio_url")
+        if video_urls:
+            payload["video_urls"] = video_urls
+        if audio_urls:
+            payload["audio_urls"] = audio_urls
+        payload["generate_audio"] = bool(settings.get("generate_audio", True))
 
     payload.update(parse_extra_fields(settings["extra_field"]))
     return payload

@@ -46,19 +46,29 @@ const VIDEO_MODEL_CAPS = {
     },
     'sora-v3-pro': {
         ratios: ['21:9', '1:1', '4:3', '3:4', '16:9', '9:16'],
-        resolutions: ['480p', '720p'],
+        resolutions: ['720p'],
         durationRange: [4, 15],
-        maxRefs: 4,
-        supportsStartEnd: true,
+        maxRefs: 9,
+        maxVideoRefs: 3,
+        maxAudioRefs: 3,
+        maxTotalRefs: 12,
+        supportsStartEnd: false,
         supportsVideoReference: true,
+        supportsAudioReference: true,
+        usesReferenceUrlArrays: true,
     },
     'sora-v3-fast': {
         ratios: ['21:9', '1:1', '4:3', '3:4', '16:9', '9:16'],
-        resolutions: ['480p', '720p'],
+        resolutions: ['720p'],
         durationRange: [4, 15],
-        maxRefs: 4,
-        supportsStartEnd: true,
+        maxRefs: 9,
+        maxVideoRefs: 3,
+        maxAudioRefs: 3,
+        maxTotalRefs: 12,
+        supportsStartEnd: false,
         supportsVideoReference: true,
+        supportsAudioReference: true,
+        usesReferenceUrlArrays: true,
     },
     'veo31-fast': {
         ratios: ['16:9', '9:16'],
@@ -114,6 +124,8 @@ const app = createApp({
         const activePolls = new Map();
         const imageFiles = ref([]);
         const videoFiles = ref([]);
+        const videoReferenceFiles = ref([]);
+        const audioReferenceFiles = ref([]);
 
         const isLoading = computed(() =>
             results.value.some(item => item.status === 'starting' || item.status === 'running')
@@ -127,6 +139,11 @@ const app = createApp({
             .length;
         const imageReferenceCount = computed(() => countReferenceUrls(image.imageUrls) + imageFiles.value.length);
         const videoReferenceCount = computed(() => countReferenceUrls(video.imageUrls) + videoFiles.value.length);
+        const videoUrlReferenceCount = computed(() => countReferenceUrls(video.videoUrls) + videoReferenceFiles.value.length);
+        const audioUrlReferenceCount = computed(() => countReferenceUrls(video.audioUrls) + audioReferenceFiles.value.length);
+        const totalVideoMediaReferenceCount = computed(() => (
+            videoReferenceCount.value + videoUrlReferenceCount.value + audioUrlReferenceCount.value
+        ));
         const previewImageStyle = computed(() => ({
             transform: `translate3d(${previewImagePan.x}px, ${previewImagePan.y}px, 0) scale(${previewImageScale.value})`,
             transformOrigin: previewImageTransformOrigin.value,
@@ -137,6 +154,7 @@ const app = createApp({
 
         const config = reactive({
             baseUrl: 'https://api.pixellelabs.com',
+            publicMediaBaseUrl: '',
             enableProxy: true,
             proxyUrl: 'http://127.0.0.1:10808',
             gptImage2ApiKey: '',
@@ -176,7 +194,10 @@ const app = createApp({
             startFrame: '',
             endFrame: '',
             videoReference: '',
-            imageUrls: ''
+            imageUrls: '',
+            videoUrls: '',
+            audioUrls: '',
+            generateAudio: true,
         });
 
         const videoModelOptions = Object.keys(VIDEO_MODEL_CAPS);
@@ -219,6 +240,14 @@ const app = createApp({
             }
             if (!cap.supportsVideoReference) {
                 video.videoReference = '';
+            }
+            if (cap.usesReferenceUrlArrays) {
+                video.videoReference = '';
+            } else {
+                video.videoUrls = '';
+                video.audioUrls = '';
+                videoReferenceFiles.value = [];
+                audioReferenceFiles.value = [];
             }
         };
 
@@ -289,6 +318,7 @@ const app = createApp({
 
         const serializeConfig = () => ({
             baseUrl: config.baseUrl,
+            publicMediaBaseUrl: config.publicMediaBaseUrl,
             enableProxy: config.enableProxy,
             proxyUrl: config.proxyUrl,
             gptImage2ApiKey: config.gptImage2ApiKey,
@@ -327,7 +357,7 @@ const app = createApp({
 
         const applySavedConfig = (savedData) => {
             const savedConfig = savedData.config || {};
-            ['baseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey'].forEach(key => {
+            ['baseUrl', 'publicMediaBaseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey'].forEach(key => {
                 if (Object.prototype.hasOwnProperty.call(savedConfig, key)) {
                     config[key] = savedConfig[key];
                 }
@@ -472,6 +502,22 @@ const app = createApp({
 
         const onVideoFilesChange = (event) => {
             videoFiles.value = Array.from(event.target.files || []);
+        };
+
+        const onVideoReferenceFilesChange = (event) => {
+            videoReferenceFiles.value = Array.from(event.target.files || []);
+        };
+
+        const onAudioReferenceFilesChange = (event) => {
+            audioReferenceFiles.value = Array.from(event.target.files || []);
+        };
+
+        const removeVideoReferenceFile = (index) => {
+            videoReferenceFiles.value.splice(index, 1);
+        };
+
+        const removeAudioReferenceFile = (index) => {
+            audioReferenceFiles.value.splice(index, 1);
         };
 
         const appendReferenceUrl = (target, url) => {
@@ -714,18 +760,44 @@ const app = createApp({
             if (videoFiles.value.length) {
                 placeholder.logs.push(`[输入] 已附加 ${videoFiles.value.length} 张本地参考图。`);
             }
+            if (videoReferenceFiles.value.length) {
+                placeholder.logs.push(`[输入] 已附加 ${videoReferenceFiles.value.length} 个本地参考视频。`);
+            }
+            if (audioReferenceFiles.value.length) {
+                placeholder.logs.push(`[输入] 已附加 ${audioReferenceFiles.value.length} 个本地参考音频。`);
+            }
             currentLogs.value = placeholder.logs;
 
             try {
-                if (!usingStartEnd) {
-                    const urlRefCount = video.imageUrls.split('\n').map(s => s.trim()).filter(Boolean).length;
-                    const referenceCount = urlRefCount + videoFiles.value.length;
-                    if (referenceCount > cap.maxRefs) {
-                        throw new Error(`当前模型最多支持 ${cap.maxRefs} 张参考图。`);
+                const imageCount = videoReferenceCount.value;
+                if (!usingStartEnd && imageCount > cap.maxRefs) {
+                    throw new Error(`当前模型最多支持 ${cap.maxRefs} 张参考图。`);
+                }
+                if (cap.usesReferenceUrlArrays) {
+                    const videoCount = videoUrlReferenceCount.value;
+                    const audioCount = audioUrlReferenceCount.value;
+                    if (videoCount > cap.maxVideoRefs) {
+                        throw new Error(`当前模型最多支持 ${cap.maxVideoRefs} 个参考视频。`);
+                    }
+                    if (audioCount > cap.maxAudioRefs) {
+                        throw new Error(`当前模型最多支持 ${cap.maxAudioRefs} 个参考音频。`);
+                    }
+                    if (totalVideoMediaReferenceCount.value > cap.maxTotalRefs) {
+                        throw new Error(`当前模型的参考素材合计最多 ${cap.maxTotalRefs} 个。`);
+                    }
+                    if (audioCount > 0 && imageCount === 0 && videoCount === 0) {
+                        throw new Error('参考音频必须搭配至少一张参考图片或一个参考视频。');
+                    }
+                    const hasLocalReferences = videoFiles.value.length
+                        || videoReferenceFiles.value.length
+                        || audioReferenceFiles.value.length;
+                    if (hasLocalReferences && !String(config.publicMediaBaseUrl || '').trim()) {
+                        throw new Error('上传本地参考素材前，请先在系统配置中填写参考素材公网地址。');
                     }
                 }
                 const payload = new FormData();
                 appendCommonTaskFields(payload, video, resolveVideoApiKey(video.model), { includeReferences: !usingStartEnd });
+                payload.append('public_media_base_url', String(config.publicMediaBaseUrl || '').trim());
                 payload.append('duration', video.duration);
                 if (videoSupportsResolution.value && video.resolution) {
                     payload.append('resolution', video.resolution);
@@ -736,7 +808,17 @@ const app = createApp({
                     if (video.startFrame.trim()) payload.append('start_frame', video.startFrame.trim());
                     if (video.endFrame.trim()) payload.append('end_frame', video.endFrame.trim());
                 }
-                if (cap.supportsVideoReference && video.videoReference.trim()) {
+                if (cap.usesReferenceUrlArrays) {
+                    video.videoUrls.split('\n').map(s => s.trim()).filter(Boolean).forEach(url => {
+                        payload.append('video_url', url);
+                    });
+                    video.audioUrls.split('\n').map(s => s.trim()).filter(Boolean).forEach(url => {
+                        payload.append('audio_url', url);
+                    });
+                    videoReferenceFiles.value.forEach(file => payload.append('video_file', file));
+                    audioReferenceFiles.value.forEach(file => payload.append('audio_file', file));
+                    payload.append('generate_audio', video.generateAudio ? 'true' : 'false');
+                } else if (cap.supportsVideoReference && video.videoReference.trim()) {
                     payload.append('video_reference', video.videoReference.trim());
                     payload.append('video_reference_field', cap.videoReferenceField || 'video_reference');
                 }
@@ -746,7 +828,7 @@ const app = createApp({
 
                 const res = await fetch('/api/video', { method: 'POST', body: payload });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.message || '视频任务启动失败');
+                if (!res.ok) throw new Error(data.detail || data.message || '视频任务启动失败');
 
                 updateResult(placeholder.id, {
                     taskId: data.internal_task_id,
@@ -837,8 +919,10 @@ const app = createApp({
             authSettings, systemSettings,
             config, image, video,
             videoModelOptions, currentImageCapability, imageAspectRatios, currentVideoCapability, videoSupportsResolution, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
-            imageFiles, videoFiles, imageReferenceCount, videoReferenceCount,
-            onImageFilesChange, onVideoFilesChange,
+            imageFiles, videoFiles, videoReferenceFiles, audioReferenceFiles,
+            imageReferenceCount, videoReferenceCount, videoUrlReferenceCount, audioUrlReferenceCount, totalVideoMediaReferenceCount,
+            onImageFilesChange, onVideoFilesChange, onVideoReferenceFilesChange, onAudioReferenceFilesChange,
+            removeVideoReferenceFile, removeAudioReferenceFile,
             onResultDragStart, onReferenceDrop,
             results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, previewImageStyle, showLogs, showSystemConfig,
             openPreview, closePreview, toggleLogs, closeLogs, openSystemConfig, closeSystemConfig, saveSystemConfig, refreshTaskList, setGalleryFilter,

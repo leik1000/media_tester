@@ -4,6 +4,7 @@ import hmac
 import json
 import mimetypes
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import time
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Dict, Any
 from urllib.parse import urlparse, unquote
 
-from fastapi import FastAPI, Request, BackgroundTasks, Query
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import requests
@@ -29,16 +30,25 @@ app.mount("/static", StaticFiles(directory="web"), name="static")
 tasks_store: Dict[str, Dict[str, Any]] = {}
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
 DOWNLOAD_DIR = Path(__file__).resolve().parent / "downloads"
+REFERENCE_MEDIA_DIR = DOWNLOAD_DIR / "reference-media"
 THUMB_DIR = DOWNLOAD_DIR / "thumbs"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CONFIG_DB_PATH = DATA_DIR / "config.db"
 SESSION_COOKIE = "media_tester_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
 THUMBNAIL_SIZE = (480, 270)
+SORA_V3_MODELS = {"sora-v3-pro", "sora-v3-fast"}
+SORA_V3_RATIOS = {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+REFERENCE_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 THUMB_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/downloads", StaticFiles(directory=str(DOWNLOAD_DIR)), name="downloads")
+app.mount(
+    "/reference-media",
+    StaticFiles(directory=str(REFERENCE_MEDIA_DIR)),
+    name="reference-media",
+)
 
 
 def init_config_db() -> None:
@@ -214,7 +224,11 @@ ensure_auth_config()
 async def require_login(request: Request, call_next):
     path = request.url.path
     public_paths = {"/", "/login", "/api/auth/status", "/api/auth/login"}
-    if path in public_paths or path.startswith("/static/"):
+    if (
+        path in public_paths
+        or path.startswith("/static/")
+        or path.startswith("/reference-media/")
+    ):
         return await call_next(request)
     if not is_authenticated(request):
         return JSONResponse(status_code=401, content={"message": "请先登录"})
@@ -229,13 +243,25 @@ def form_value(form, name: str, default: str = "") -> str:
 
 
 def form_urls(form) -> list[str]:
+    return form_media_urls(form, "image_url")
+
+
+def form_media_urls(form, *field_names: str) -> list[str]:
     urls: list[str] = []
-    for value in form.getlist("image_url"):
-        for line in str(value or "").splitlines():
-            line = line.strip()
-            if line:
-                urls.append(line)
+    for field_name in field_names:
+        for value in form.getlist(field_name):
+            for line in str(value or "").splitlines():
+                line = line.strip()
+                if line and line not in urls:
+                    urls.append(line)
     return urls
+
+
+def form_bool(form, name: str, default: bool = False) -> bool:
+    value = form.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def split_reference_urls(urls: list[str]) -> tuple[list[str], list[str]]:
@@ -279,6 +305,134 @@ async def save_uploaded_images(form) -> list[str]:
         target.write_bytes(raw)
         saved_paths.append(str(target))
     return saved_paths
+
+
+def normalize_public_media_base_url(value: str) -> str:
+    normalized = str(value or "").strip().rstrip("/")
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="本地参考素材需要配置有效的 HTTP(S) 公网素材地址",
+        )
+    return normalized
+
+
+def public_reference_media_url(public_base_url: str, path: Path) -> str:
+    base_url = normalize_public_media_base_url(public_base_url)
+    return f"{base_url}/reference-media/{path.name}"
+
+
+async def save_reference_uploads(
+    form,
+    field_name: str,
+    media_kind: str,
+    public_base_url: str,
+) -> tuple[list[str], list[str]]:
+    uploads = [
+        upload
+        for upload in form.getlist(field_name)
+        if str(getattr(upload, "filename", "") or "").strip()
+    ]
+    if not uploads:
+        return [], []
+    base_url = normalize_public_media_base_url(public_base_url)
+    saved_paths: list[str] = []
+    urls: list[str] = []
+    try:
+        for upload in uploads:
+            filename = str(getattr(upload, "filename", "") or "").strip()
+            content_type = str(getattr(upload, "content_type", "") or "").lower()
+            if content_type and not content_type.startswith(f"{media_kind}/"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{filename} 不是有效的{media_kind}文件",
+                )
+            suffix = Path(filename).suffix.lower()
+            if not suffix:
+                suffix = mimetypes.guess_extension(content_type) or ""
+            target = REFERENCE_MEDIA_DIR / f"{uuid.uuid4().hex}{suffix}"
+            size = 0
+            with target.open("wb") as output:
+                while True:
+                    chunk = await upload.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    size += len(chunk)
+            if size <= 0:
+                target.unlink(missing_ok=True)
+                raise HTTPException(status_code=400, detail=f"上传的{media_kind}文件为空：{filename}")
+            saved_paths.append(str(target))
+            urls.append(public_reference_media_url(base_url, target))
+    except Exception:
+        cleanup_files(saved_paths)
+        raise
+    return saved_paths, urls
+
+
+def publish_reference_files(
+    file_paths: list[str], public_base_url: str
+) -> tuple[list[str], list[str]]:
+    if not file_paths:
+        return [], []
+    base_url = normalize_public_media_base_url(public_base_url)
+    saved_paths: list[str] = []
+    urls: list[str] = []
+    try:
+        for item in file_paths:
+            source = Path(item)
+            if not source.is_file():
+                raise HTTPException(status_code=400, detail=f"参考素材不存在：{source.name}")
+            target = REFERENCE_MEDIA_DIR / f"{uuid.uuid4().hex}{source.suffix.lower()}"
+            shutil.copyfile(source, target)
+            saved_paths.append(str(target))
+            urls.append(public_reference_media_url(base_url, target))
+    except Exception:
+        cleanup_files(saved_paths)
+        raise
+    return saved_paths, urls
+
+
+def validate_http_reference_urls(urls: list[str], label: str) -> None:
+    for value in urls:
+        parsed = urlparse(str(value or "").strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(status_code=400, detail=f"{label}必须是完整的 HTTP(S) URL")
+
+
+def validate_sora_v3_video_request(
+    *,
+    model: str,
+    aspect_ratio: str,
+    resolution: str,
+    duration: int,
+    image_count: int,
+    video_count: int,
+    audio_count: int,
+    has_start_frame: bool = False,
+    has_end_frame: bool = False,
+) -> None:
+    if model not in SORA_V3_MODELS:
+        return
+    if aspect_ratio not in SORA_V3_RATIOS:
+        raise HTTPException(status_code=400, detail="Sora V3 不支持该视频比例")
+    if resolution and resolution != "720p":
+        raise HTTPException(status_code=400, detail="Sora V3 分辨率固定为 720p")
+    if duration < 4 or duration > 15:
+        raise HTTPException(status_code=400, detail="Sora V3 时长必须是 4-15 秒的整数")
+    if has_start_frame or has_end_frame:
+        raise HTTPException(status_code=400, detail="Sora V3 不使用 start_frame 或 end_frame")
+    if image_count > 9:
+        raise HTTPException(status_code=400, detail="Sora V3 最多支持 9 张参考图")
+    if video_count > 3:
+        raise HTTPException(status_code=400, detail="Sora V3 最多支持 3 个参考视频")
+    if audio_count > 3:
+        raise HTTPException(status_code=400, detail="Sora V3 最多支持 3 个参考音频")
+    if image_count + video_count + audio_count > 12:
+        raise HTTPException(status_code=400, detail="Sora V3 参考素材合计最多 12 个")
+    if audio_count and not image_count and not video_count:
+        raise HTTPException(status_code=400, detail="参考音频必须搭配参考图片或参考视频")
 
 
 def cleanup_files(paths: list[str]) -> None:
@@ -808,27 +962,168 @@ def run_video_task(internal_task_id: str, settings: dict):
 @app.post("/api/video")
 async def generate_video(request: Request, background_tasks: BackgroundTasks):
     form = await request.form()
-    temp_files = await save_uploaded_images(form)
-    remote_urls, local_reference_files = split_reference_urls(form_urls(form))
+    model = form_value(form, "model", video_runner.DEFAULT_MODEL).strip()
+    try:
+        duration = int(
+            form_value(form, "duration", str(video_runner.DEFAULT_DURATION))
+            or video_runner.DEFAULT_DURATION
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="视频时长必须是整数") from exc
+    aspect_ratio = form_value(
+        form, "aspect_ratio", video_runner.DEFAULT_ASPECT_RATIO
+    ).strip()
+    resolution = form_value(form, "resolution").strip()
+    temp_files: list[str] = []
+
+    if model in SORA_V3_MODELS:
+        image_values = form_media_urls(
+            form,
+            "image_url",
+            "image_urls",
+            "input_reference",
+            "reference_image_urls",
+        )
+        video_values = form_media_urls(
+            form,
+            "reference_video",
+            "reference_videos",
+            "video_urls",
+            "video_url",
+            "input_videos",
+            "input_video",
+        )
+        audio_values = form_media_urls(
+            form,
+            "audio_url",
+            "audio_urls",
+            "input_audios",
+            "input_audio",
+        )
+        remote_images, local_images = split_reference_urls(image_values)
+        remote_videos, local_videos = split_reference_urls(video_values)
+        remote_audios, local_audios = split_reference_urls(audio_values)
+        image_upload_count = sum(
+            1
+            for item in form.getlist("image_file")
+            if str(getattr(item, "filename", "") or "").strip()
+        )
+        video_upload_count = sum(
+            1
+            for item in form.getlist("video_file")
+            if str(getattr(item, "filename", "") or "").strip()
+        )
+        audio_upload_count = sum(
+            1
+            for item in form.getlist("audio_file")
+            if str(getattr(item, "filename", "") or "").strip()
+        )
+        validate_sora_v3_video_request(
+            model=model,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution or "720p",
+            duration=duration,
+            image_count=len(remote_images) + len(local_images) + image_upload_count,
+            video_count=len(remote_videos) + len(local_videos) + video_upload_count,
+            audio_count=len(remote_audios) + len(local_audios) + audio_upload_count,
+            has_start_frame=bool(form_value(form, "start_frame").strip()),
+            has_end_frame=bool(form_value(form, "end_frame").strip()),
+        )
+
+        public_base_url = form_value(form, "public_media_base_url").strip()
+        try:
+            uploaded_image_paths, uploaded_image_urls = await save_reference_uploads(
+                form, "image_file", "image", public_base_url
+            )
+            temp_files.extend(uploaded_image_paths)
+            uploaded_video_paths, uploaded_video_urls = await save_reference_uploads(
+                form, "video_file", "video", public_base_url
+            )
+            temp_files.extend(uploaded_video_paths)
+            uploaded_audio_paths, uploaded_audio_urls = await save_reference_uploads(
+                form, "audio_file", "audio", public_base_url
+            )
+            temp_files.extend(uploaded_audio_paths)
+
+            published_image_paths, published_image_urls = publish_reference_files(
+                local_images, public_base_url
+            )
+            temp_files.extend(published_image_paths)
+            published_video_paths, published_video_urls = publish_reference_files(
+                local_videos, public_base_url
+            )
+            temp_files.extend(published_video_paths)
+            published_audio_paths, published_audio_urls = publish_reference_files(
+                local_audios, public_base_url
+            )
+            temp_files.extend(published_audio_paths)
+
+            image_urls = [
+                *remote_images,
+                *published_image_urls,
+                *uploaded_image_urls,
+            ]
+            video_urls = [
+                *remote_videos,
+                *published_video_urls,
+                *uploaded_video_urls,
+            ]
+            audio_urls = [
+                *remote_audios,
+                *published_audio_urls,
+                *uploaded_audio_urls,
+            ]
+            validate_http_reference_urls(image_urls, "参考图片")
+            validate_http_reference_urls(video_urls, "参考视频")
+            validate_http_reference_urls(audio_urls, "参考音频")
+        except Exception:
+            cleanup_files(temp_files)
+            raise
+
+        media_settings = {
+            "start_frame": "",
+            "end_frame": "",
+            "video_reference": "",
+            "video_reference_field": "video_reference",
+            "image_url": image_urls,
+            "image_file": [],
+            "video_url": video_urls,
+            "audio_url": audio_urls,
+            "generate_audio": form_bool(form, "generate_audio", True),
+            "_temp_files": temp_files,
+        }
+        resolution = "720p"
+    else:
+        legacy_temp_files = await save_uploaded_images(form)
+        remote_urls, local_reference_files = split_reference_urls(form_urls(form))
+        temp_files.extend(legacy_temp_files)
+        media_settings = {
+            "start_frame": form_value(form, "start_frame"),
+            "end_frame": form_value(form, "end_frame"),
+            "video_reference": form_value(form, "video_reference"),
+            "video_reference_field": form_value(form, "video_reference_field")
+            or "video_reference",
+            "image_url": remote_urls,
+            "image_file": legacy_temp_files + local_reference_files,
+            "video_url": [],
+            "audio_url": [],
+            "generate_audio": form_bool(form, "generate_audio", True),
+            "_temp_files": legacy_temp_files,
+        }
+
     settings = {
         "base_url": form_value(form, "base_url", video_runner.DEFAULT_BASE_URL),
         "proxy_url": form_value(form, "proxy_url"),
         "api_key": form_value(form, "api_key"),
         "create_path": form_value(form, "create_path", video_runner.DEFAULT_CREATE_PATH),
         "status_path": form_value(form, "status_path", video_runner.DEFAULT_STATUS_PATH),
-        "model": form_value(form, "model", video_runner.DEFAULT_MODEL),
+        "model": model,
         "prompt": form_value(form, "prompt", video_runner.DEFAULT_PROMPT),
-        "aspect_ratio": form_value(form, "aspect_ratio", video_runner.DEFAULT_ASPECT_RATIO),
+        "aspect_ratio": aspect_ratio,
         "size": form_value(form, "size"),
-        "duration": int(form_value(form, "duration", str(video_runner.DEFAULT_DURATION)) or video_runner.DEFAULT_DURATION),
-        "resolution": form_value(form, "resolution"),
-        "start_frame": form_value(form, "start_frame"),
-        "end_frame": form_value(form, "end_frame"),
-        "video_reference": form_value(form, "video_reference"),
-        "video_reference_field": form_value(form, "video_reference_field") or "video_reference",
-        "image_url": remote_urls,
-        "image_file": temp_files + local_reference_files,
-        "_temp_files": temp_files,
+        "duration": duration,
+        "resolution": resolution,
+        **media_settings,
     }
     settings["request_timeout"] = 600
     settings["proxies"] = build_proxies(settings.get("proxy_url", ""))

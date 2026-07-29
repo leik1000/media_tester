@@ -278,10 +278,33 @@
                                 <input type="text" class="glass-input text-sm" v-model="video.endFrame" placeholder="end_frame URL">
                             </div>
                         </div>
-                        <div v-if="currentVideoCapability.supportsVideoReference">
+                        <div v-if="currentVideoCapability.supportsVideoReference && !currentVideoCapability.usesReferenceUrlArrays">
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">视频参考</label>
                             <input type="text" class="glass-input text-sm" v-model="video.videoReference" placeholder="video_reference URL">
                         </div>
+                        <div v-if="currentVideoCapability.usesReferenceUrlArrays">
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5 flex justify-between items-end">
+                                参考视频地址
+                                <span class="text-[10px] text-gray-500 font-normal">（每行一个）</span>
+                            </label>
+                            <textarea class="glass-input text-sm resize-none" v-model="video.videoUrls" rows="2" placeholder="https://.../reference.mp4"></textarea>
+                            <p class="mt-1.5 text-[11px] font-medium text-indigo-300">当前参考视频：{{ videoUrlReferenceCount }} / {{ currentVideoCapability.maxVideoRefs }}</p>
+                        </div>
+                        <div v-if="currentVideoCapability.supportsAudioReference">
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5 flex justify-between items-end">
+                                参考音频地址
+                                <span class="text-[10px] text-gray-500 font-normal">（每行一个）</span>
+                            </label>
+                            <textarea class="glass-input text-sm resize-none" v-model="video.audioUrls" rows="2" placeholder="https://.../reference.mp3"></textarea>
+                            <div class="mt-1.5 flex items-center justify-between gap-3 text-[11px] font-medium text-indigo-300">
+                                <span>当前参考音频：{{ audioUrlReferenceCount }} / {{ currentVideoCapability.maxAudioRefs }}</span>
+                                <span>素材合计：{{ totalVideoMediaReferenceCount }} / {{ currentVideoCapability.maxTotalRefs }}</span>
+                            </div>
+                        </div>
+                        <label v-if="currentVideoCapability.usesReferenceUrlArrays" class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-xs font-medium text-gray-300">
+                            <input type="checkbox" v-model="video.generateAudio" class="h-4 w-4 accent-indigo-500">
+                            <span>生成音频</span>
+                        </label>
                         <div>
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">本地参考图</label>
                             <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10" @dragover.prevent @drop.prevent="onReferenceDrop($event, 'video')">
@@ -292,6 +315,40 @@
                                     <span class="text-[11px] text-indigo-300" v-if="videoFiles.length">已选择 {{ videoFiles.length }} 个文件</span>
                                 </div>
                             </label>
+                        </div>
+                        <div v-if="currentVideoCapability.usesReferenceUrlArrays">
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">本地参考视频</label>
+                            <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10">
+                                <input type="file" class="hidden" multiple accept="video/*" @change="onVideoReferenceFilesChange">
+                                <div class="flex flex-col items-center gap-2">
+                                    <svg class="w-5 h-5 text-indigo-400 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                    <span class="text-xs text-gray-300">选择视频文件</span>
+                                    <span class="text-[11px] text-indigo-300" v-if="videoReferenceFiles.length">已选择 {{ videoReferenceFiles.length }} 个文件</span>
+                                </div>
+                            </label>
+                            <div v-if="videoReferenceFiles.length" class="mt-1.5 space-y-1">
+                                <div v-for="(file, index) in videoReferenceFiles" :key="`${file.name}-${index}`" class="flex items-center justify-between gap-2 text-[11px] text-gray-400">
+                                    <span class="min-w-0 truncate">{{ file.name }}</span>
+                                    <button type="button" @click="removeVideoReferenceFile(index)" class="h-6 w-6 shrink-0 text-base text-gray-500 transition hover:text-white" title="移除视频">×</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="currentVideoCapability.supportsAudioReference">
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">本地参考音频</label>
+                            <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10">
+                                <input type="file" class="hidden" multiple accept="audio/*" @change="onAudioReferenceFilesChange">
+                                <div class="flex flex-col items-center gap-2">
+                                    <svg class="w-5 h-5 text-indigo-400 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18V5l12-2v13M9 9l12-2M6 21a3 3 0 100-6 3 3 0 000 6zm12-2a3 3 0 100-6 3 3 0 000 6z"></path></svg>
+                                    <span class="text-xs text-gray-300">选择音频文件</span>
+                                    <span class="text-[11px] text-indigo-300" v-if="audioReferenceFiles.length">已选择 {{ audioReferenceFiles.length }} 个文件</span>
+                                </div>
+                            </label>
+                            <div v-if="audioReferenceFiles.length" class="mt-1.5 space-y-1">
+                                <div v-for="(file, index) in audioReferenceFiles" :key="`${file.name}-${index}`" class="flex items-center justify-between gap-2 text-[11px] text-gray-400">
+                                    <span class="min-w-0 truncate">{{ file.name }}</span>
+                                    <button type="button" @click="removeAudioReferenceFile(index)" class="h-6 w-6 shrink-0 text-base text-gray-500 transition hover:text-white" title="移除音频">×</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </transition>
@@ -508,6 +565,10 @@
                             <input type="text" class="glass-input text-sm" v-model="config.baseUrl" placeholder="https://api.pixellelabs.com">
                         </div>
                         <div>
+                            <label class="block text-xs font-medium text-gray-400 mb-1.5">参考素材公网地址</label>
+                            <input type="text" class="glass-input text-sm" v-model="config.publicMediaBaseUrl" placeholder="https://tester.example.com">
+                        </div>
+                        <div>
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">代理地址</label>
                             <input type="text" class="glass-input text-sm" v-model="config.proxyUrl" placeholder="例如 http://127.0.0.1:10808">
                         </div>
@@ -534,6 +595,6 @@
         @keyframes shimmer { 100% { transform: translateX(100%); } }
         @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
-    <script src="/static/app.js?v=20260722-system-config"></script>
+    <script src="/static/app.js?v=20260730-sora-reference-media"></script>
 </body>
 </html>
