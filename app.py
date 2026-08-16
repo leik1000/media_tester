@@ -4,14 +4,13 @@ import hmac
 import json
 import mimetypes
 import secrets
-import shutil
 import sqlite3
 import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
-from urllib.parse import urlparse, unquote
+from urllib.parse import quote, urlparse, unquote
 
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
@@ -44,11 +43,6 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 REFERENCE_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 THUMB_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/downloads", StaticFiles(directory=str(DOWNLOAD_DIR)), name="downloads")
-app.mount(
-    "/reference-media",
-    StaticFiles(directory=str(REFERENCE_MEDIA_DIR)),
-    name="reference-media",
-)
 
 
 def init_config_db() -> None:
@@ -227,7 +221,7 @@ async def require_login(request: Request, call_next):
     if (
         path in public_paths
         or path.startswith("/static/")
-        or path.startswith("/reference-media/")
+        or path.startswith("/downloads/")
     ):
         return await call_next(request)
     if not is_authenticated(request):
@@ -274,9 +268,13 @@ def split_reference_urls(urls: list[str]) -> tuple[list[str], list[str]]:
         parsed = urlparse(value)
         path_value = parsed.path if parsed.scheme in {"http", "https"} else value
         if path_value.startswith("/downloads/"):
-            filename = Path(unquote(path_value)).name
-            local_path = DOWNLOAD_DIR / filename
-            if local_path.is_file():
+            relative_path = Path(unquote(path_value.removeprefix("/downloads/")))
+            try:
+                local_path = (DOWNLOAD_DIR / relative_path).resolve()
+                local_path.relative_to(DOWNLOAD_DIR.resolve())
+            except ValueError:
+                local_path = None
+            if local_path and local_path.is_file():
                 local_files.append(str(local_path))
                 continue
         remote_urls.append(value)
@@ -318,9 +316,13 @@ def normalize_public_media_base_url(value: str) -> str:
     return normalized
 
 
-def public_reference_media_url(public_base_url: str, path: Path) -> str:
+def public_download_media_url(public_base_url: str, path: Path) -> str:
     base_url = normalize_public_media_base_url(public_base_url)
-    return f"{base_url}/reference-media/{path.name}"
+    try:
+        relative_path = path.resolve().relative_to(DOWNLOAD_DIR.resolve()).as_posix()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="参考素材不在下载目录中") from exc
+    return f"{base_url}/downloads/{quote(relative_path, safe='/')}"
 
 
 async def save_reference_uploads(
@@ -364,34 +366,26 @@ async def save_reference_uploads(
                 target.unlink(missing_ok=True)
                 raise HTTPException(status_code=400, detail=f"上传的{media_kind}文件为空：{filename}")
             saved_paths.append(str(target))
-            urls.append(public_reference_media_url(base_url, target))
+            urls.append(public_download_media_url(base_url, target))
     except Exception:
         cleanup_files(saved_paths)
         raise
     return saved_paths, urls
 
 
-def publish_reference_files(
+def public_reference_file_urls(
     file_paths: list[str], public_base_url: str
-) -> tuple[list[str], list[str]]:
+) -> list[str]:
     if not file_paths:
-        return [], []
+        return []
     base_url = normalize_public_media_base_url(public_base_url)
-    saved_paths: list[str] = []
     urls: list[str] = []
-    try:
-        for item in file_paths:
-            source = Path(item)
-            if not source.is_file():
-                raise HTTPException(status_code=400, detail=f"参考素材不存在：{source.name}")
-            target = REFERENCE_MEDIA_DIR / f"{uuid.uuid4().hex}{source.suffix.lower()}"
-            shutil.copyfile(source, target)
-            saved_paths.append(str(target))
-            urls.append(public_reference_media_url(base_url, target))
-    except Exception:
-        cleanup_files(saved_paths)
-        raise
-    return saved_paths, urls
+    for item in file_paths:
+        source = Path(item)
+        if not source.is_file():
+            raise HTTPException(status_code=400, detail=f"参考素材不存在：{source.name}")
+        urls.append(public_download_media_url(base_url, source))
+    return urls
 
 
 def validate_http_reference_urls(urls: list[str], label: str) -> None:
@@ -974,7 +968,6 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
         form, "aspect_ratio", video_runner.DEFAULT_ASPECT_RATIO
     ).strip()
     resolution = form_value(form, "resolution").strip()
-    temp_files: list[str] = []
 
     if model in SORA_V3_MODELS:
         image_values = form_media_urls(
@@ -1031,53 +1024,51 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
         )
 
         public_base_url = form_value(form, "public_media_base_url").strip()
+        new_reference_files: list[str] = []
         try:
             uploaded_image_paths, uploaded_image_urls = await save_reference_uploads(
                 form, "image_file", "image", public_base_url
             )
-            temp_files.extend(uploaded_image_paths)
+            new_reference_files.extend(uploaded_image_paths)
             uploaded_video_paths, uploaded_video_urls = await save_reference_uploads(
                 form, "video_file", "video", public_base_url
             )
-            temp_files.extend(uploaded_video_paths)
+            new_reference_files.extend(uploaded_video_paths)
             uploaded_audio_paths, uploaded_audio_urls = await save_reference_uploads(
                 form, "audio_file", "audio", public_base_url
             )
-            temp_files.extend(uploaded_audio_paths)
+            new_reference_files.extend(uploaded_audio_paths)
 
-            published_image_paths, published_image_urls = publish_reference_files(
+            local_image_urls = public_reference_file_urls(
                 local_images, public_base_url
             )
-            temp_files.extend(published_image_paths)
-            published_video_paths, published_video_urls = publish_reference_files(
+            local_video_urls = public_reference_file_urls(
                 local_videos, public_base_url
             )
-            temp_files.extend(published_video_paths)
-            published_audio_paths, published_audio_urls = publish_reference_files(
+            local_audio_urls = public_reference_file_urls(
                 local_audios, public_base_url
             )
-            temp_files.extend(published_audio_paths)
 
             image_urls = [
                 *remote_images,
-                *published_image_urls,
+                *local_image_urls,
                 *uploaded_image_urls,
             ]
             video_urls = [
                 *remote_videos,
-                *published_video_urls,
+                *local_video_urls,
                 *uploaded_video_urls,
             ]
             audio_urls = [
                 *remote_audios,
-                *published_audio_urls,
+                *local_audio_urls,
                 *uploaded_audio_urls,
             ]
             validate_http_reference_urls(image_urls, "参考图片")
             validate_http_reference_urls(video_urls, "参考视频")
             validate_http_reference_urls(audio_urls, "参考音频")
         except Exception:
-            cleanup_files(temp_files)
+            cleanup_files(new_reference_files)
             raise
 
         media_settings = {
@@ -1090,13 +1081,12 @@ async def generate_video(request: Request, background_tasks: BackgroundTasks):
             "video_url": video_urls,
             "audio_url": audio_urls,
             "generate_audio": form_bool(form, "generate_audio", True),
-            "_temp_files": temp_files,
+            "_temp_files": [],
         }
         resolution = "720p"
     else:
         legacy_temp_files = await save_uploaded_images(form)
         remote_urls, local_reference_files = split_reference_urls(form_urls(form))
-        temp_files.extend(legacy_temp_files)
         media_settings = {
             "start_frame": form_value(form, "start_frame"),
             "end_frame": form_value(form, "end_frame"),

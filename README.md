@@ -43,6 +43,7 @@ Then open `http://server-ip:5800`.
 
 Generated assets are saved under `downloads/`. Runtime settings, including API keys, are saved in `data/config.db`.
 The Compose file mounts `./downloads` and `./data` so generated assets and settings persist after container restarts.
+`/downloads/` is publicly readable without a login so external generation services can fetch reference media. Treat generated asset URLs as public. Generated images are referenced directly as `<public-media-base-url>/downloads/image_....png`; local reference uploads are stored once under `downloads/reference-media/`.
 
 Files:
 
