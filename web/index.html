@@ -134,15 +134,17 @@
                         <div>
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">模型</label>
                             <select class="glass-input text-sm appearance-none" v-model="image.model">
-                                <option class="bg-gray-900" value="gemini-3-pro-image-preview">gemini-3-pro-image-preview</option>
-                                <option class="bg-gray-900" value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
-                                <option class="bg-gray-900" value="gpt-image-2">gpt-image-2</option>
+                                <option v-for="modelName in imageModelOptions" :key="modelName" class="bg-gray-900" :value="modelName">{{ modelName }}</option>
                             </select>
                         </div>
                         <div class="rounded-xl border border-white/10 bg-white/[0.025] p-2.5">
                             <div v-if="image.model === 'gpt-image-2'">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">gpt-image-2 Key</label>
                                 <input type="password" class="glass-input text-sm" v-model="config.gptImage2ApiKey" placeholder="此模型 API Key">
+                            </div>
+                            <div v-else-if="image.model === 'seedream-5-pro'">
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">seedream-5-pro Key</label>
+                                <input type="password" class="glass-input text-sm" v-model="config.seedreamImageApiKey" placeholder="此模型 API Key">
                             </div>
                             <div v-else-if="image.model === 'gemini-3-pro-image-preview'">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">gemini-3-pro-image-preview Key</label>
@@ -151,6 +153,10 @@
                             <div v-else-if="image.model === 'gemini-3.1-flash-image-preview'">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">gemini-3.1-flash-image-preview Key</label>
                                 <input type="password" class="glass-input text-sm" v-model="config.gemini31FlashImageApiKey" placeholder="此模型 API Key">
+                            </div>
+                            <div v-else-if="image.model === 'gemini-3.1-flash-lite-image'">
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">gemini-3.1-flash-lite-image Key</label>
+                                <input type="password" class="glass-input text-sm" v-model="config.gemini31FlashLiteImageApiKey" placeholder="此模型 API Key">
                             </div>
                         </div>
                         <div>
@@ -167,13 +173,11 @@
                             <div class="flex-1">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">尺寸</label>
                                 <select class="glass-input text-sm appearance-none" v-model="image.size">
-                                    <option class="bg-gray-900">1K</option>
-                                    <option class="bg-gray-900">2K</option>
-                                    <option class="bg-gray-900">4K</option>
+                                    <option v-for="size in imageSizeOptions" :key="size" class="bg-gray-900" :value="size">{{ size }}</option>
                                 </select>
                             </div>
                         </div>
-                        <div v-if="image.model === 'gpt-image-2'">
+                        <div v-if="imageSupportsQuality">
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">质量</label>
                             <select class="glass-input text-sm appearance-none" v-model="image.quality">
                                 <option class="bg-gray-900" value="low">低</option>

@@ -22,7 +22,9 @@ DEFAULT_OUTPUT_NAME = "gemini_image_test_result"
 MODEL_OPTIONS = [
     "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview",
+    "gemini-3.1-flash-lite-image",
     "gpt-image-2",
+    "seedream-5-pro",
 ]
 ASPECT_RATIO_OPTIONS = [
     "auto",
@@ -42,7 +44,12 @@ ASPECT_RATIO_OPTIONS = [
     "8:1",
 ]
 IMAGE_SIZE_OPTIONS = ["1K", "2K", "4K"]
-OPENAI_IMAGE_MODELS = {"gpt-image-2"}
+OPENAI_IMAGE_MODELS = {"gpt-image-2", "seedream-5-pro"}
+OPENAI_QUALITY_MODELS = {"gpt-image-2"}
+OPENAI_RESOLUTION_SIZE_MODELS = {"seedream-5-pro"}
+OPENAI_RESOLUTION_SIZE_OPTIONS = {
+    "seedream-5-pro": ["1K", "2K"],
+}
 OPENAI_QUALITY_OPTIONS = ["low", "medium", "high"]
 DEFAULT_OPENAI_QUALITY = "medium"
 OPENAI_IMAGE_SIZE_MAP = {
@@ -152,6 +159,14 @@ def is_openai_image_model(model: str) -> bool:
     return str(model or "").strip() in OPENAI_IMAGE_MODELS
 
 
+def supports_openai_quality(model: str) -> bool:
+    return str(model or "").strip() in OPENAI_QUALITY_MODELS
+
+
+def uses_openai_resolution_size(model: str) -> bool:
+    return str(model or "").strip() in OPENAI_RESOLUTION_SIZE_MODELS
+
+
 def openai_image_size(image_size: str, aspect_ratio: str) -> str:
     size = str(image_size or DEFAULT_IMAGE_SIZE).strip().upper()
     ratio = str(aspect_ratio or DEFAULT_ASPECT_RATIO).strip()
@@ -160,19 +175,39 @@ def openai_image_size(image_size: str, aspect_ratio: str) -> str:
     return OPENAI_IMAGE_SIZE_MAP.get((size, ratio), OPENAI_IMAGE_SIZE_MAP[("2K", "16:9")])
 
 
+def openai_resolution_size(model: str, image_size: str) -> str:
+    size = str(image_size or DEFAULT_IMAGE_SIZE).strip().upper()
+    options = OPENAI_RESOLUTION_SIZE_OPTIONS.get(str(model or "").strip(), ["1K", "2K", "4K"])
+    if size in options:
+        return size
+    if DEFAULT_IMAGE_SIZE in options:
+        return DEFAULT_IMAGE_SIZE
+    return options[0]
+
+
 def build_payload(settings: dict[str, Any]) -> dict[str, Any]:
-    if is_openai_image_model(str(settings.get("model") or "")):
+    model = str(settings.get("model") or "")
+    if is_openai_image_model(model):
         payload = {
             "model": settings["model"],
             "prompt": settings["prompt"],
-            "size": openai_image_size(
-                str(settings.get("image_size") or ""),
-                str(settings.get("aspect_ratio") or ""),
-            ),
             "n": 1,
         }
+        if uses_openai_resolution_size(model):
+            payload["size"] = openai_resolution_size(
+                model,
+                str(settings.get("image_size") or ""),
+            )
+            aspect_ratio = str(settings.get("aspect_ratio") or DEFAULT_ASPECT_RATIO).strip()
+            if aspect_ratio:
+                payload["aspect_ratio"] = aspect_ratio
+        else:
+            payload["size"] = openai_image_size(
+                str(settings.get("image_size") or ""),
+                str(settings.get("aspect_ratio") or ""),
+            )
         quality = str(settings.get("quality") or DEFAULT_OPENAI_QUALITY).strip()
-        if quality in OPENAI_QUALITY_OPTIONS:
+        if supports_openai_quality(model) and quality in OPENAI_QUALITY_OPTIONS:
             payload["quality"] = quality
         if settings.get("image_url") or settings.get("image_file"):
             payload["image_url"] = list(settings.get("image_url") or [])
@@ -236,6 +271,8 @@ def create_openai_image(settings: dict[str, Any], payload: dict[str, Any]) -> di
         "size": payload["size"],
         "n": payload.get("n", 1),
     }
+    if payload.get("aspect_ratio"):
+        request_payload["aspect_ratio"] = payload["aspect_ratio"]
     if payload.get("quality"):
         request_payload["quality"] = payload["quality"]
     response = requests.post(
@@ -266,6 +303,8 @@ def create_openai_image_edit(
         "size": payload["size"],
         "n": str(payload.get("n", 1)),
     }
+    if payload.get("aspect_ratio"):
+        data["aspect_ratio"] = payload["aspect_ratio"]
     if payload.get("quality"):
         data["quality"] = payload["quality"]
     handles = []

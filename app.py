@@ -457,7 +457,7 @@ def json_loads(value: str | None, default: Any) -> Any:
 def task_meta(task_type: str, settings: dict[str, Any]) -> str:
     if task_type == "image":
         meta = f"{settings.get('image_size')} · {settings.get('aspect_ratio')}"
-        if image_runner.is_openai_image_model(str(settings.get("model") or "")):
+        if image_runner.supports_openai_quality(str(settings.get("model") or "")):
             meta = f"{meta} · {settings.get('quality') or image_runner.DEFAULT_OPENAI_QUALITY}"
         return meta
     return f"{settings.get('duration')}s · {settings.get('aspect_ratio')} · {settings.get('resolution')}"
@@ -676,7 +676,7 @@ def save_image_asset(image_bytes: bytes, mime_type: str, settings: dict[str, Any
     thumbnail = save_image_thumbnail(file_path, asset_id) or {}
     model = str(settings.get("model") or "")
     meta = f"{settings.get('image_size')} · {settings.get('aspect_ratio')}"
-    if image_runner.is_openai_image_model(model):
+    if image_runner.supports_openai_quality(model):
         meta = f"{meta} · {settings.get('quality') or image_runner.DEFAULT_OPENAI_QUALITY}"
     return {
         "id": asset_id,

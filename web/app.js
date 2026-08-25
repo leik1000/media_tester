@@ -80,16 +80,31 @@ const VIDEO_MODEL_CAPS = {
     },
 };
 
+const IMAGE_SIZE_OPTIONS = ['1K', '2K', '4K'];
 const BASE_IMAGE_RATIOS = ['1:1', '4:3', '3:4', '5:4', '4:5', '3:2', '2:3', '16:9', '9:16', '21:9'];
+const SEEDREAM_IMAGE_RATIOS = ['9:21', '9:16', '2:3', '3:4', '1:1', '4:3', '3:2', '16:9', '21:9'];
+const GEMINI_LITE_IMAGE_RATIOS = ['8:1', '4:1', '21:9', '16:9', '3:2', '4:3', '5:4', '1:1'];
 const IMAGE_MODEL_CAPS = {
     'gemini-3-pro-image-preview': {
         ratios: ['auto', ...BASE_IMAGE_RATIOS],
+        sizes: IMAGE_SIZE_OPTIONS,
     },
     'gemini-3.1-flash-image-preview': {
         ratios: ['auto', ...BASE_IMAGE_RATIOS, '1:4', '4:1', '1:8', '8:1'],
+        sizes: IMAGE_SIZE_OPTIONS,
+    },
+    'gemini-3.1-flash-lite-image': {
+        ratios: GEMINI_LITE_IMAGE_RATIOS,
+        sizes: ['1K'],
     },
     'gpt-image-2': {
         ratios: BASE_IMAGE_RATIOS,
+        sizes: IMAGE_SIZE_OPTIONS,
+        supportsQuality: true,
+    },
+    'seedream-5-pro': {
+        ratios: SEEDREAM_IMAGE_RATIOS,
+        sizes: ['1K', '2K'],
     },
 };
 
@@ -158,8 +173,10 @@ const app = createApp({
             enableProxy: true,
             proxyUrl: 'http://127.0.0.1:10808',
             gptImage2ApiKey: '',
+            seedreamImageApiKey: '',
             gemini3ProImageApiKey: '',
             gemini31FlashImageApiKey: '',
+            gemini31FlashLiteImageApiKey: '',
             videoApiKeys: Object.fromEntries(Object.keys(VIDEO_MODEL_CAPS).map(model => [model, '']))
         });
 
@@ -200,9 +217,12 @@ const app = createApp({
             generateAudio: true,
         });
 
+        const imageModelOptions = Object.keys(IMAGE_MODEL_CAPS);
         const videoModelOptions = Object.keys(VIDEO_MODEL_CAPS);
         const currentImageCapability = computed(() => IMAGE_MODEL_CAPS[image.model] || IMAGE_MODEL_CAPS['gemini-3-pro-image-preview']);
         const imageAspectRatios = computed(() => currentImageCapability.value.ratios);
+        const imageSizeOptions = computed(() => currentImageCapability.value.sizes || IMAGE_SIZE_OPTIONS);
+        const imageSupportsQuality = computed(() => currentImageCapability.value.supportsQuality === true);
         const currentVideoCapability = computed(() => VIDEO_MODEL_CAPS[video.model] || VIDEO_MODEL_CAPS.sora2);
         const videoSupportsResolution = computed(() => currentVideoCapability.value.exposesResolution !== false);
         const videoDurationOptions = computed(() => currentVideoCapability.value.durations || []);
@@ -210,10 +230,14 @@ const app = createApp({
         const videoDurationMin = computed(() => videoDurationRange.value ? videoDurationRange.value[0] : null);
         const videoDurationMax = computed(() => videoDurationRange.value ? videoDurationRange.value[1] : null);
 
+        const defaultImageSize = (sizes) => sizes.includes('2K') ? '2K' : sizes[0];
+
         const normalizeImageSettings = () => {
             if (!IMAGE_MODEL_CAPS[image.model]) image.model = 'gemini-3-pro-image-preview';
             const cap = currentImageCapability.value;
             if (!cap.ratios.includes(image.aspectRatio)) image.aspectRatio = cap.ratios[0];
+            const sizes = cap.sizes || IMAGE_SIZE_OPTIONS;
+            if (!sizes.includes(image.size)) image.size = defaultImageSize(sizes);
         };
 
         const normalizeVideoSettings = () => {
@@ -322,8 +346,10 @@ const app = createApp({
             enableProxy: config.enableProxy,
             proxyUrl: config.proxyUrl,
             gptImage2ApiKey: config.gptImage2ApiKey,
+            seedreamImageApiKey: config.seedreamImageApiKey,
             gemini3ProImageApiKey: config.gemini3ProImageApiKey,
             gemini31FlashImageApiKey: config.gemini31FlashImageApiKey,
+            gemini31FlashLiteImageApiKey: config.gemini31FlashLiteImageApiKey,
             videoApiKeys: { ...config.videoApiKeys },
         });
 
@@ -357,7 +383,7 @@ const app = createApp({
 
         const applySavedConfig = (savedData) => {
             const savedConfig = savedData.config || {};
-            ['baseUrl', 'publicMediaBaseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey'].forEach(key => {
+            ['baseUrl', 'publicMediaBaseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'seedreamImageApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey', 'gemini31FlashLiteImageApiKey'].forEach(key => {
                 if (Object.prototype.hasOwnProperty.call(savedConfig, key)) {
                     config[key] = savedConfig[key];
                 }
@@ -474,8 +500,10 @@ const app = createApp({
         const resolveImageApiKey = (model) => {
             const keyByModel = {
                 'gpt-image-2': config.gptImage2ApiKey,
+                'seedream-5-pro': config.seedreamImageApiKey,
                 'gemini-3-pro-image-preview': config.gemini3ProImageApiKey,
                 'gemini-3.1-flash-image-preview': config.gemini31FlashImageApiKey,
+                'gemini-3.1-flash-lite-image': config.gemini31FlashLiteImageApiKey,
             };
             return keyByModel[model] || '';
         };
@@ -688,7 +716,7 @@ const app = createApp({
         };
 
         const runImageTask = async () => {
-            const meta = image.model === 'gpt-image-2'
+            const meta = imageSupportsQuality.value
                 ? `${image.size} · ${image.aspectRatio} · ${image.quality || 'medium'}`
                 : `${image.size} · ${image.aspectRatio}`;
             const placeholder = createPlaceholder({
@@ -710,7 +738,7 @@ const app = createApp({
                 const payload = new FormData();
                 appendCommonTaskFields(payload, image, resolveImageApiKey(image.model));
                 payload.append('image_size', image.size);
-                if (image.model === 'gpt-image-2') {
+                if (imageSupportsQuality.value) {
                     payload.append('quality', image.quality || 'medium');
                 }
                 imageFiles.value.forEach(file => payload.append('image_file', file));
@@ -918,7 +946,7 @@ const app = createApp({
             tab, isLoading, isSubmitting,
             authSettings, systemSettings,
             config, image, video,
-            videoModelOptions, currentImageCapability, imageAspectRatios, currentVideoCapability, videoSupportsResolution, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
+            imageModelOptions, videoModelOptions, currentImageCapability, imageAspectRatios, imageSizeOptions, imageSupportsQuality, currentVideoCapability, videoSupportsResolution, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
             imageFiles, videoFiles, videoReferenceFiles, audioReferenceFiles,
             imageReferenceCount, videoReferenceCount, videoUrlReferenceCount, audioUrlReferenceCount, totalVideoMediaReferenceCount,
             onImageFilesChange, onVideoFilesChange, onVideoReferenceFilesChange, onAudioReferenceFilesChange,
