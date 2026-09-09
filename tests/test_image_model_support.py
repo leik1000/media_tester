@@ -62,6 +62,41 @@ class ImagePayloadTests(unittest.TestCase):
         self.assertEqual(payload["quality"], "high")
         self.assertNotIn("aspect_ratio", payload)
 
+    def test_gpt_image_2_5_models_use_openai_generation_and_quality(self):
+        for model in ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+            with self.subTest(model=model):
+                payload = image_runner.build_payload(
+                    _image_settings(
+                        model=model,
+                        aspect_ratio="16:9",
+                        image_size="2K",
+                        quality="high",
+                    )
+                )
+
+                self.assertTrue(image_runner.is_openai_image_model(model))
+                self.assertTrue(image_runner.supports_openai_quality(model))
+                self.assertEqual(payload["model"], model)
+                self.assertEqual(payload["size"], "2048x1152")
+                self.assertEqual(payload["quality"], "high")
+                self.assertNotIn("aspect_ratio", payload)
+
+    def test_gpt_image_2_5_unknown_quality_defaults_to_high(self):
+        for model in ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+            for quality in ("xhigh", "max", "unsupported"):
+                with self.subTest(model=model, quality=quality):
+                    payload = image_runner.build_payload(
+                        _image_settings(model=model, quality=quality)
+                    )
+                    self.assertEqual(payload["quality"], "high")
+
+    def test_gpt_image_2_unknown_quality_keeps_existing_behavior(self):
+        payload = image_runner.build_payload(
+            _image_settings(model="gpt-image-2", quality="xhigh")
+        )
+
+        self.assertNotIn("quality", payload)
+
     def test_gemini_lite_uses_generate_content_image_config(self):
         payload = image_runner.build_payload(
             _image_settings(

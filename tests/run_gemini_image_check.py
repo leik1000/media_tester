@@ -24,6 +24,8 @@ MODEL_OPTIONS = [
     "gemini-3.1-flash-image-preview",
     "gemini-3.1-flash-lite-image",
     "gpt-image-2",
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
     "seedream-5-pro",
 ]
 ASPECT_RATIO_OPTIONS = [
@@ -44,8 +46,21 @@ ASPECT_RATIO_OPTIONS = [
     "8:1",
 ]
 IMAGE_SIZE_OPTIONS = ["1K", "2K", "4K"]
-OPENAI_IMAGE_MODELS = {"gpt-image-2", "seedream-5-pro"}
-OPENAI_QUALITY_MODELS = {"gpt-image-2"}
+OPENAI_IMAGE_MODELS = {
+    "gpt-image-2",
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+    "seedream-5-pro",
+}
+OPENAI_QUALITY_MODELS = {
+    "gpt-image-2",
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+}
+OPENAI_QUALITY_FALLBACK_HIGH_MODELS = {
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+}
 OPENAI_RESOLUTION_SIZE_MODELS = {"seedream-5-pro"}
 OPENAI_RESOLUTION_SIZE_OPTIONS = {
     "seedream-5-pro": ["1K", "2K"],
@@ -163,6 +178,18 @@ def supports_openai_quality(model: str) -> bool:
     return str(model or "").strip() in OPENAI_QUALITY_MODELS
 
 
+def normalize_openai_quality(model: str, quality: str) -> str | None:
+    normalized_model = str(model or "").strip()
+    normalized_quality = str(quality or "").strip().lower()
+    if normalized_model in OPENAI_QUALITY_FALLBACK_HIGH_MODELS:
+        if normalized_quality in OPENAI_QUALITY_OPTIONS:
+            return normalized_quality
+        return "high"
+    if normalized_model in OPENAI_QUALITY_MODELS:
+        return normalized_quality if normalized_quality in OPENAI_QUALITY_OPTIONS else None
+    return None
+
+
 def uses_openai_resolution_size(model: str) -> bool:
     return str(model or "").strip() in OPENAI_RESOLUTION_SIZE_MODELS
 
@@ -207,8 +234,9 @@ def build_payload(settings: dict[str, Any]) -> dict[str, Any]:
                 str(settings.get("aspect_ratio") or ""),
             )
         quality = str(settings.get("quality") or DEFAULT_OPENAI_QUALITY).strip()
-        if supports_openai_quality(model) and quality in OPENAI_QUALITY_OPTIONS:
-            payload["quality"] = quality
+        normalized_quality = normalize_openai_quality(model, quality)
+        if normalized_quality:
+            payload["quality"] = normalized_quality
         if settings.get("image_url") or settings.get("image_file"):
             payload["image_url"] = list(settings.get("image_url") or [])
             payload["image_file"] = list(settings.get("image_file") or [])

@@ -4,7 +4,8 @@ Local web-based test tool for:
 
 - async video generation
 - Gemini image generation
-- OpenAI Images API compatible `gpt-image-2` / `seedream-5-pro` generation/editing
+- OpenAI Images API compatible `gpt-image-2`, `gpt-image-2.5-flare`,
+  `gpt-image-2.5-sunburst`, and `seedream-5-pro` generation/editing
 
 Video models currently exposed in the UI include `kling-video-3.0`,
 `kling-video-o3-omni`, `sora2`, `sora-v3-pro`, `sora-v3-fast`, `veo31-fast`,
@@ -50,7 +51,7 @@ Files:
 - `app.py`: FastAPI Web Server
 - `web/`: Web Frontend (HTML/JS/Tailwind)
 - `tests/run_video_availability_check.py`: video test logic
-- `tests/run_gemini_image_check.py`: image test logic. Gemini models, including `gemini-3.1-flash-lite-image`, use `generateContent`; `gpt-image-2` and `seedream-5-pro` use official `/v1/images/generations` and `/v1/images/edits` endpoints.
+- `tests/run_gemini_image_check.py`: image test logic. Gemini models, including `gemini-3.1-flash-lite-image`, use `generateContent`; `gpt-image-2`, `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, and `seedream-5-pro` use official `/v1/images/generations` and `/v1/images/edits` endpoints.
 
 Notes:
 

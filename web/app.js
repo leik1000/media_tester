@@ -102,6 +102,16 @@ const IMAGE_MODEL_CAPS = {
         sizes: IMAGE_SIZE_OPTIONS,
         supportsQuality: true,
     },
+    'gpt-image-2.5-flare': {
+        ratios: BASE_IMAGE_RATIOS,
+        sizes: IMAGE_SIZE_OPTIONS,
+        supportsQuality: true,
+    },
+    'gpt-image-2.5-sunburst': {
+        ratios: BASE_IMAGE_RATIOS,
+        sizes: IMAGE_SIZE_OPTIONS,
+        supportsQuality: true,
+    },
     'seedream-5-pro': {
         ratios: SEEDREAM_IMAGE_RATIOS,
         sizes: ['1K', '2K'],
@@ -173,6 +183,8 @@ const app = createApp({
             enableProxy: true,
             proxyUrl: 'http://127.0.0.1:10808',
             gptImage2ApiKey: '',
+            gptImage25FlareApiKey: '',
+            gptImage25SunburstApiKey: '',
             seedreamImageApiKey: '',
             gemini3ProImageApiKey: '',
             gemini31FlashImageApiKey: '',
@@ -346,6 +358,8 @@ const app = createApp({
             enableProxy: config.enableProxy,
             proxyUrl: config.proxyUrl,
             gptImage2ApiKey: config.gptImage2ApiKey,
+            gptImage25FlareApiKey: config.gptImage25FlareApiKey,
+            gptImage25SunburstApiKey: config.gptImage25SunburstApiKey,
             seedreamImageApiKey: config.seedreamImageApiKey,
             gemini3ProImageApiKey: config.gemini3ProImageApiKey,
             gemini31FlashImageApiKey: config.gemini31FlashImageApiKey,
@@ -383,7 +397,7 @@ const app = createApp({
 
         const applySavedConfig = (savedData) => {
             const savedConfig = savedData.config || {};
-            ['baseUrl', 'publicMediaBaseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'seedreamImageApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey', 'gemini31FlashLiteImageApiKey'].forEach(key => {
+            ['baseUrl', 'publicMediaBaseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'gptImage25FlareApiKey', 'gptImage25SunburstApiKey', 'seedreamImageApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey', 'gemini31FlashLiteImageApiKey'].forEach(key => {
                 if (Object.prototype.hasOwnProperty.call(savedConfig, key)) {
                     config[key] = savedConfig[key];
                 }
@@ -500,6 +514,8 @@ const app = createApp({
         const resolveImageApiKey = (model) => {
             const keyByModel = {
                 'gpt-image-2': config.gptImage2ApiKey,
+                'gpt-image-2.5-flare': config.gptImage25FlareApiKey,
+                'gpt-image-2.5-sunburst': config.gptImage25SunburstApiKey,
                 'seedream-5-pro': config.seedreamImageApiKey,
                 'gemini-3-pro-image-preview': config.gemini3ProImageApiKey,
                 'gemini-3.1-flash-image-preview': config.gemini31FlashImageApiKey,
