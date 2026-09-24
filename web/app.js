@@ -1,4 +1,4 @@
-const { createApp, ref, reactive, watch, onMounted, computed } = Vue;
+const { createApp, ref, reactive, watch, onMounted, onBeforeUnmount, computed } = Vue;
 
 const rawFetch = window.fetch.bind(window);
 window.fetch = async (...args) => {
@@ -147,10 +147,10 @@ const app = createApp({
         const pageSize = 20;
         let saveConfigTimer = null;
         const activePolls = new Map();
-        const imageFiles = ref([]);
-        const videoFiles = ref([]);
         const videoReferenceFiles = ref([]);
         const audioReferenceFiles = ref([]);
+        const referenceImages = reactive({ image: [], video: [] });
+        const referenceControllers = new Map();
 
         const isLoading = computed(() =>
             results.value.some(item => item.status === 'starting' || item.status === 'running')
@@ -162,8 +162,8 @@ const app = createApp({
             .map(item => item.trim())
             .filter(Boolean)
             .length;
-        const imageReferenceCount = computed(() => countReferenceUrls(image.imageUrls) + imageFiles.value.length);
-        const videoReferenceCount = computed(() => countReferenceUrls(video.imageUrls) + videoFiles.value.length);
+        const imageReferenceCount = computed(() => referenceImages.image.length);
+        const videoReferenceCount = computed(() => referenceImages.video.length);
         const videoUrlReferenceCount = computed(() => countReferenceUrls(video.videoUrls) + videoReferenceFiles.value.length);
         const audioUrlReferenceCount = computed(() => countReferenceUrls(video.audioUrls) + audioReferenceFiles.value.length);
         const totalVideoMediaReferenceCount = computed(() => (
@@ -369,7 +369,12 @@ const app = createApp({
 
         const saveCurrentConfig = async () => {
             clearTimeout(saveConfigTimer);
-            const payload = JSON.stringify({ config: serializeConfig(), image, video });
+            const payload = JSON.stringify({ config: serializeConfig(), image, video,
+                referenceImages: Object.fromEntries(['image', 'video'].map(target => [target,
+                    referenceImages[target].filter(item => item.status === 'ready').map(item => ({
+                        id: item.id, source: item.source, name: item.name, url: item.url,
+                        thumbnailUrl: item.thumbnailUrl, sourceUrl: item.sourceUrl,
+                    }))])) });
             const res = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -413,6 +418,19 @@ const app = createApp({
             Object.assign(video, savedData.video || {});
             normalizeImageSettings();
             normalizeVideoSettings();
+            ['image', 'video'].forEach(target => {
+                const saved = savedData.referenceImages?.[target];
+                if (Array.isArray(saved)) {
+                    referenceImages[target] = saved.filter(item => item.url?.startsWith('/downloads/'))
+                        .map(item => ({ ...item, status: 'ready' }));
+                    syncReferenceUrls(target);
+                } else {
+                    const source = target === 'image' ? image : video;
+                    const urls = source.imageUrls;
+                    source.imageUrls = '';
+                    addReferenceUrls(target, urls);
+                }
+            });
         };
 
         const loadSavedConfig = async () => {
@@ -475,7 +493,7 @@ const app = createApp({
             await loadPersistedTasks(1);
         };
 
-        watch([config, image, video], () => {
+        watch([config, image, video, referenceImages], () => {
             if (!configLoaded.value) return;
             clearTimeout(saveConfigTimer);
             saveConfigTimer = setTimeout(() => {
@@ -540,14 +558,6 @@ const app = createApp({
             }
         };
 
-        const onImageFilesChange = (event) => {
-            imageFiles.value = Array.from(event.target.files || []);
-        };
-
-        const onVideoFilesChange = (event) => {
-            videoFiles.value = Array.from(event.target.files || []);
-        };
-
         const onVideoReferenceFilesChange = (event) => {
             videoReferenceFiles.value = Array.from(event.target.files || []);
         };
@@ -564,31 +574,121 @@ const app = createApp({
             audioReferenceFiles.value.splice(index, 1);
         };
 
-        const appendReferenceUrl = (target, url) => {
-            const value = String(url || '').trim();
-            if (!value) return;
-            const current = target.imageUrls
-                .split('\n')
-                .map(item => item.trim())
-                .filter(Boolean);
-            if (!current.includes(value)) {
-                current.push(value);
-            }
-            target.imageUrls = current.join('\n');
-        };
-
         const onResultDragStart = (event, item) => {
-            if (item.status !== 'completed' || !item.url) return;
+            if (item.status !== 'completed' || item.type !== 'image' || !item.url) {
+                event.preventDefault();
+                return;
+            }
             event.dataTransfer.effectAllowed = 'copy';
             event.dataTransfer.setData('text/plain', item.url);
             event.dataTransfer.setData('application/x-media-tester-url', item.url);
+            event.dataTransfer.setData('application/x-media-tester-image', JSON.stringify({
+                url: item.url, thumbnailUrl: item.thumbnailUrl || item.thumbnail_url,
+                name: item.filename || item.model,
+            }));
         };
 
         const onReferenceDrop = (event, targetName) => {
-            const url = event.dataTransfer.getData('application/x-media-tester-url') || event.dataTransfer.getData('text/plain');
-            appendReferenceUrl(targetName === 'video' ? video : image, url);
-            pushLog(`[输入] 已从画廊添加参考图：${url}`);
+            if (event.dataTransfer.files.length) {
+                addReferenceFiles(targetName, Array.from(event.dataTransfer.files));
+                return;
+            }
+            const gallery = event.dataTransfer.getData('application/x-media-tester-image');
+            if (gallery) {
+                try {
+                    const item = JSON.parse(gallery);
+                    if (referenceImages[targetName].some(ref => ref.url === item.url)) return;
+                    if (item.thumbnailUrl && item.url?.startsWith('/downloads/')) {
+                        referenceImages[targetName].push({ ...item, id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+                            source: 'gallery', status: 'ready' });
+                        syncReferenceUrls(targetName);
+                        return;
+                    }
+                } catch (_) { /* Fall back to importing the dropped URL. */ }
+            }
+            addReferenceUrls(targetName, event.dataTransfer.getData('application/x-media-tester-url') || event.dataTransfer.getData('text/plain'));
         };
+
+        const syncReferenceUrls = (target) => {
+            (target === 'image' ? image : video).imageUrls = referenceImages[target]
+                .filter(item => item.status === 'ready').map(item => item.url).join('\n');
+        };
+
+        const importReference = async (target, item) => {
+            if (referenceControllers.has(item.id)) return;
+            const controller = new AbortController();
+            referenceControllers.set(item.id, controller);
+            item.status = 'loading';
+            item.error = '';
+            try {
+                const payload = new FormData();
+                if (item.file) payload.append('image_file', item.file);
+                else payload.append('url', item.sourceUrl);
+                payload.append('proxy_url', config.enableProxy ? config.proxyUrl : '');
+                const res = await fetch('/api/reference-images', { method: 'POST', body: payload, signal: controller.signal });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || '参考图片导入失败');
+                if (!referenceImages[target].some(ref => ref.id === item.id)) return;
+                if (item.localPreview) URL.revokeObjectURL(item.localPreview);
+                Object.assign(item, { url: data.url, thumbnailUrl: data.thumbnailUrl,
+                    status: 'ready', localPreview: null, file: null });
+                syncReferenceUrls(target);
+            } catch (error) {
+                if (controller.signal.aborted) return;
+                item.status = 'error';
+                item.error = error.message || '导入失败';
+            } finally {
+                referenceControllers.delete(item.id);
+            }
+        };
+
+        const addReferenceFiles = (target, files) => {
+            files.forEach(file => {
+                const key = `${file.name}:${file.size}:${file.lastModified}`;
+                if (referenceImages[target].some(item => item.fileKey === key)) return;
+                const invalid = !file.type.startsWith('image/') || file.size > 20 * 1024 * 1024;
+                const item = reactive({ id: `${Date.now()}-${Math.random()}`, source: 'local',
+                    name: file.name, file, fileKey: key, status: invalid ? 'error' : 'loading',
+                    error: invalid ? '请选择不超过 20 MB 的图片' : '',
+                    localPreview: invalid ? null : URL.createObjectURL(file) });
+                referenceImages[target].push(item);
+                if (!invalid) importReference(target, item);
+            });
+        };
+
+        const addReferenceUrls = (target, text) => {
+            String(text || '').split(/\r?\n/).map(url => url.trim()).filter(Boolean).forEach(url => {
+                if (referenceImages[target].some(item => item.sourceUrl === url || item.url === url)) return;
+                const item = reactive({ id: `${Date.now()}-${Math.random()}`, source: 'url',
+                    name: url.split('/').pop()?.split('?')[0] || 'URL 图片', sourceUrl: url, status: 'loading' });
+                referenceImages[target].push(item);
+                importReference(target, item);
+            });
+        };
+
+        const removeReference = (target, id) => {
+            const item = referenceImages[target].find(item => item.id === id);
+            referenceControllers.get(id)?.abort();
+            if (item?.localPreview) URL.revokeObjectURL(item.localPreview);
+            referenceImages[target] = referenceImages[target].filter(item => item.id !== id);
+            syncReferenceUrls(target);
+        };
+
+        const validateReferenceImages = (target) => {
+            if (referenceImages[target].some(item => item.status === 'loading')) {
+                throw new Error('参考图片正在上传或下载，请等待完成后再生成。');
+            }
+            if (referenceImages[target].some(item => item.status !== 'ready')) {
+                throw new Error('有参考图片导入失败，请重试或移除后再生成。');
+            }
+        };
+
+        onBeforeUnmount(() => {
+            referenceControllers.forEach(controller => controller.abort());
+            Object.values(referenceImages).flat().forEach(item => {
+                if (item.localPreview) URL.revokeObjectURL(item.localPreview);
+            });
+        });
 
         const createPlaceholder = (item) => {
             const startedAtMs = Date.now();
@@ -745,19 +845,19 @@ const app = createApp({
                     `[配置] 模型：${image.model} | ${meta}`,
                 ],
             });
-            if (imageFiles.value.length) {
-                placeholder.logs.push(`[输入] 已附加 ${imageFiles.value.length} 张本地参考图。`);
+            if (referenceImages.image.length) {
+                placeholder.logs.push(`[输入] 已附加 ${referenceImages.image.length} 张参考图。`);
             }
             currentLogs.value = placeholder.logs;
 
             try {
+                validateReferenceImages('image');
                 const payload = new FormData();
                 appendCommonTaskFields(payload, image, resolveImageApiKey(image.model));
                 payload.append('image_size', image.size);
                 if (imageSupportsQuality.value) {
                     payload.append('quality', image.quality || 'medium');
                 }
-                imageFiles.value.forEach(file => payload.append('image_file', file));
 
                 const res = await fetch('/api/image', { method: 'POST', body: payload });
                 const data = await res.json();
@@ -801,8 +901,8 @@ const app = createApp({
                     `[配置] 模型：${video.model} | ${meta}`,
                 ],
             });
-            if (videoFiles.value.length) {
-                placeholder.logs.push(`[输入] 已附加 ${videoFiles.value.length} 张本地参考图。`);
+            if (!usingStartEnd && referenceImages.video.length) {
+                placeholder.logs.push(`[输入] 已附加 ${referenceImages.video.length} 张参考图。`);
             }
             if (videoReferenceFiles.value.length) {
                 placeholder.logs.push(`[输入] 已附加 ${videoReferenceFiles.value.length} 个本地参考视频。`);
@@ -813,6 +913,7 @@ const app = createApp({
             currentLogs.value = placeholder.logs;
 
             try {
+                if (!usingStartEnd) validateReferenceImages('video');
                 const imageCount = videoReferenceCount.value;
                 if (!usingStartEnd && imageCount > cap.maxRefs) {
                     throw new Error(`当前模型最多支持 ${cap.maxRefs} 张参考图。`);
@@ -832,7 +933,7 @@ const app = createApp({
                     if (audioCount > 0 && imageCount === 0 && videoCount === 0) {
                         throw new Error('参考音频必须搭配至少一张参考图片或一个参考视频。');
                     }
-                    const hasLocalReferences = videoFiles.value.length
+                    const hasLocalReferences = (!usingStartEnd && referenceImages.video.some(item => item.url?.startsWith('/downloads/')))
                         || videoReferenceFiles.value.length
                         || audioReferenceFiles.value.length;
                     if (hasLocalReferences && !String(config.publicMediaBaseUrl || '').trim()) {
@@ -865,9 +966,6 @@ const app = createApp({
                 } else if (cap.supportsVideoReference && video.videoReference.trim()) {
                     payload.append('video_reference', video.videoReference.trim());
                     payload.append('video_reference_field', cap.videoReferenceField || 'video_reference');
-                }
-                if (!usingStartEnd) {
-                    videoFiles.value.forEach(file => payload.append('image_file', file));
                 }
 
                 const res = await fetch('/api/video', { method: 'POST', body: payload });
@@ -963,11 +1061,12 @@ const app = createApp({
             authSettings, systemSettings,
             config, image, video,
             imageModelOptions, videoModelOptions, currentImageCapability, imageAspectRatios, imageSizeOptions, imageSupportsQuality, currentVideoCapability, videoSupportsResolution, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
-            imageFiles, videoFiles, videoReferenceFiles, audioReferenceFiles,
+            videoReferenceFiles, audioReferenceFiles,
             imageReferenceCount, videoReferenceCount, videoUrlReferenceCount, audioUrlReferenceCount, totalVideoMediaReferenceCount,
-            onImageFilesChange, onVideoFilesChange, onVideoReferenceFilesChange, onAudioReferenceFilesChange,
+            onVideoReferenceFilesChange, onAudioReferenceFilesChange,
             removeVideoReferenceFile, removeAudioReferenceFile,
             onResultDragStart, onReferenceDrop,
+            referenceImages, addReferenceFiles, addReferenceUrls, removeReference, importReference,
             results, paginatedResults, currentPage, totalPages, totalItems, galleryFilter, selectedResult, previewImageStyle, showLogs, showSystemConfig,
             openPreview, closePreview, toggleLogs, closeLogs, openSystemConfig, closeSystemConfig, saveSystemConfig, refreshTaskList, setGalleryFilter,
             onPreviewImageWheel, startPreviewImageDrag, movePreviewImageDrag, endPreviewImageDrag,
@@ -977,6 +1076,65 @@ const app = createApp({
             currentLogs, currentResult, formatJson, formatTaskDuration
         };
     }
+});
+
+app.component('reference-images', {
+    props: ['items', 'limit'],
+    emits: ['files', 'urls', 'drop', 'remove', 'retry'],
+    setup(props, { emit }) {
+        const draft = ref('');
+        const preview = ref(null);
+        const selectFiles = (event) => {
+            emit('files', Array.from(event.target.files || []));
+            event.target.value = '';
+        };
+        const importUrls = () => {
+            if (!draft.value.trim()) return;
+            emit('urls', draft.value);
+            draft.value = '';
+        };
+        return { draft, preview, selectFiles, importUrls };
+    },
+    template: `
+        <section class="space-y-2" aria-label="参考图片">
+            <div class="flex items-center justify-between text-xs">
+                <span class="font-medium text-gray-300">参考图</span>
+                <span class="text-indigo-300">{{ items.length }}{{ limit ? ' / ' + limit : '' }} 张</span>
+            </div>
+            <div v-if="items.length" class="grid grid-cols-3 gap-2">
+                <div v-for="item in items" :key="item.id" class="relative rounded-lg border border-white/10 bg-black/20 overflow-hidden">
+                    <button type="button" class="relative block aspect-square w-full overflow-hidden" :disabled="!item.thumbnailUrl && !item.localPreview" @click="preview = item" :aria-label="'预览 ' + item.name">
+                        <img v-if="item.thumbnailUrl || item.localPreview" :src="item.thumbnailUrl || item.localPreview" class="h-full w-full object-cover" :alt="item.name">
+                        <span v-else class="text-xs text-gray-500">图片</span>
+                        <span v-if="item.status === 'loading'" class="absolute inset-0 flex items-center justify-center bg-black/60 text-xs text-indigo-200">{{ item.source === 'local' ? '上传中…' : '下载中…' }}</span>
+                        <span v-if="item.status === 'error'" class="absolute inset-0 flex items-center justify-center bg-red-950/80 text-xs text-red-200">导入失败</span>
+                    </button>
+                    <button type="button" @click.stop="$emit('remove', item.id)" class="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-white hover:bg-red-600" :aria-label="'移除 ' + item.name" title="取消参考">×</button>
+                    <div class="p-1.5">
+                        <p class="truncate text-[10px] text-gray-300" :title="item.name">{{ item.name }}</p>
+                        <p class="text-[10px] text-gray-500">{{ item.source === 'local' ? '本地图片' : item.source === 'gallery' ? '画廊图片' : 'URL 图片' }}</p>
+                        <template v-if="item.status === 'error'">
+                            <p class="break-words text-[10px] text-red-300">{{ item.error }}</p>
+                            <button type="button" @click="$emit('retry', item)" class="mt-1 text-xs text-indigo-300 hover:text-white">重试</button>
+                        </template>
+                    </div>
+                </div>
+            </div>
+            <label class="block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] p-3 text-center transition hover:border-indigo-400/70" @dragover.prevent @drop.prevent="$emit('drop', $event)">
+                <input type="file" class="hidden" multiple accept="image/jpeg,image/png,image/webp,image/gif" @change="selectFiles">
+                <span class="text-xs text-gray-300">＋ 添加图片 / 拖入本地或画廊图片</span>
+                <span class="mt-1 block text-[10px] text-gray-500">每张不超过 20 MB</span>
+            </label>
+            <textarea v-model="draft" class="glass-input text-xs resize-none" rows="2" aria-label="参考图片 URL" placeholder="粘贴图片 URL，每行一个"></textarea>
+            <button type="button" @click="importUrls" :disabled="!draft.trim()" class="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-indigo-200 disabled:opacity-40">导入 URL</button>
+            <Teleport to="body">
+                <div v-if="preview" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-8" @click.self="preview = null" @keydown.esc="preview = null">
+                    <button type="button" @click="preview = null" class="absolute right-5 top-4 rounded-full bg-black/75 px-3 py-1 text-2xl text-white" aria-label="关闭参考图预览">×</button>
+                    <img :src="preview.url || preview.localPreview || preview.thumbnailUrl" :alt="preview.name" class="max-h-[85vh] max-w-full object-contain">
+                </div>
+            </Teleport>
+        </section>
+    `,
 });
 
 app.mount('#app');

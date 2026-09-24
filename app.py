@@ -15,6 +15,7 @@ from urllib.parse import quote, urlparse, unquote
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 import requests
 
 from tests import run_gemini_image_check as image_runner
@@ -36,6 +37,7 @@ CONFIG_DB_PATH = DATA_DIR / "config.db"
 SESSION_COOKIE = "media_tester_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
 THUMBNAIL_SIZE = (480, 270)
+REFERENCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024
 SORA_V3_MODELS = {"sora-v3-pro", "sora-v3-fast"}
 SORA_V3_RATIOS = {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -680,6 +682,93 @@ def save_video_thumbnail(source_path: Path, asset_id: str) -> dict[str, str] | N
         if result.returncode == 0 and thumb_path.is_file() and thumb_path.stat().st_size > 0:
             return {"thumbnail_url": public_download_url(thumb_path), "thumbnail_filename": thumb_path.name}
     return None
+
+
+def store_reference_image(chunks, name: str) -> dict[str, str]:
+    from PIL import Image
+
+    asset_id = uuid.uuid4().hex
+    target = REFERENCE_MEDIA_DIR / f"reference_{asset_id}.part"
+    thumb = THUMB_DIR / f"thumb_{asset_id}.jpg"
+    try:
+        size = 0
+        with target.open("wb") as output:
+            for chunk in chunks:
+                size += len(chunk)
+                if size > REFERENCE_IMAGE_MAX_BYTES:
+                    raise HTTPException(400, "参考图片不能超过 20 MB")
+                output.write(chunk)
+        with Image.open(target) as image:
+            image_format = image.format
+            image.verify()
+        suffix = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "GIF": ".gif"}.get(image_format)
+        if not suffix:
+            raise HTTPException(400, "仅支持 JPEG、PNG、WebP、GIF 图片")
+        destination = target.with_suffix(suffix)
+        target.rename(destination)
+        target = destination
+        thumbnail = save_image_thumbnail(target, asset_id)
+        if not thumbnail:
+            raise HTTPException(400, "图片无法解码或生成预览")
+        return {"id": asset_id, "name": name or target.name,
+                "url": public_download_url(target), "thumbnailUrl": thumbnail["thumbnail_url"]}
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        thumb.unlink(missing_ok=True)
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(400, "参考图片无效或保存失败") from exc
+
+
+def import_reference_image_url(url: str, proxy_url: str = "") -> dict[str, str]:
+    # Resolve site-relative gallery references without downloading them again.
+    if url.startswith("/downloads/"):
+        _, files = split_reference_urls([url])
+        if not files:
+            raise HTTPException(404, "参考图片文件不存在")
+        source = Path(files[0])
+        asset_id = uuid.uuid4().hex
+        thumbnail = save_image_thumbnail(source, asset_id)
+        if not thumbnail:
+            raise HTTPException(400, "该素材不是有效图片")
+        return {"id": asset_id, "name": source.name, "url": url,
+                "thumbnailUrl": thumbnail["thumbnail_url"]}
+    if urlparse(url).scheme not in {"http", "https"} or not urlparse(url).netloc:
+        raise HTTPException(400, "请输入完整的 HTTP(S) 图片地址")
+    try:
+        with requests.get(url, stream=True, timeout=(10, 30),
+                          proxies=build_proxies(proxy_url)) as response:
+            response.raise_for_status()
+            started = time.monotonic()
+
+            def chunks():
+                for chunk in response.iter_content(64 * 1024):
+                    if time.monotonic() - started > 60:
+                        raise HTTPException(400, "图片下载超时，请重试")
+                    yield chunk
+
+            return store_reference_image(chunks(), Path(unquote(urlparse(url).path)).name)
+    except requests.RequestException as exc:
+        raise HTTPException(400, "图片下载失败，请检查地址或代理设置") from exc
+
+
+@app.post("/api/reference-images")
+async def import_reference_image(request: Request):
+    form = await request.form()
+    upload = form.get("image_file")
+    if upload is not None and getattr(upload, "filename", None):
+        try:
+            return await run_in_threadpool(
+                store_reference_image,
+                iter(lambda: upload.file.read(64 * 1024), b""),
+                upload.filename,
+            )
+        finally:
+            await upload.close()
+    return await run_in_threadpool(
+        import_reference_image_url, form_value(form, "url").strip(),
+        form_value(form, "proxy_url").strip(),
+    )
 
 
 def save_image_asset(image_bytes: bytes, mime_type: str, settings: dict[str, Any]) -> dict[str, Any]:

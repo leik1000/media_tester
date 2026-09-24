@@ -193,25 +193,10 @@
                                 <option class="bg-gray-900" value="high">高</option>
                             </select>
                         </div>
-                        <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5 flex justify-between items-end">
-                                参考图地址
-                                <span class="text-[10px] text-gray-500 font-normal">（每行一个）</span>
-                            </label>
-                            <textarea class="glass-input text-sm resize-none" v-model="image.imageUrls" rows="2" placeholder="https://..."></textarea>
-                            <p class="mt-1.5 text-[11px] font-medium text-indigo-300">当前参考图：{{ imageReferenceCount }} 张</p>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">本地参考图</label>
-                            <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10" @dragover.prevent @drop.prevent="onReferenceDrop($event, 'image')">
-                                <input type="file" class="hidden" multiple accept="image/*" @change="onImageFilesChange">
-                                <div class="flex flex-col items-center gap-2">
-                                    <svg class="w-5 h-5 text-indigo-400 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                                    <span class="text-xs text-gray-300">点击上传 / 拖入画廊素材</span>
-                                    <span class="text-[11px] text-indigo-300" v-if="imageFiles.length">已选择 {{ imageFiles.length }} 个文件</span>
-                                </div>
-                            </label>
-                        </div>
+                        <reference-images :items="referenceImages.image"
+                            @files="addReferenceFiles('image', $event)" @urls="addReferenceUrls('image', $event)"
+                            @drop="onReferenceDrop($event, 'image')" @remove="removeReference('image', $event)"
+                            @retry="importReference('image', $event)"></reference-images>
                     </div>
                 </transition>
 
@@ -272,14 +257,10 @@
                                 <input type="text" class="glass-input text-sm" v-model="video.statusPath">
                             </div>
                         </div>
-                        <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5 flex justify-between items-end">
-                                参考图地址
-                                <span class="text-[10px] text-gray-500 font-normal">（每行一个）</span>
-                            </label>
-                            <textarea class="glass-input text-sm resize-none" v-model="video.imageUrls" rows="2" placeholder="https://..."></textarea>
-                            <p class="mt-1.5 text-[11px] font-medium text-indigo-300">当前参考图：{{ videoReferenceCount }} 张</p>
-                        </div>
+                        <reference-images :items="referenceImages.video" :limit="currentVideoCapability.maxRefs"
+                            @files="addReferenceFiles('video', $event)" @urls="addReferenceUrls('video', $event)"
+                            @drop="onReferenceDrop($event, 'video')" @remove="removeReference('video', $event)"
+                            @retry="importReference('video', $event)"></reference-images>
                         <div v-if="currentVideoCapability.supportsStartEnd" class="flex gap-4">
                             <div class="flex-1">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">首帧图片</label>
@@ -317,17 +298,6 @@
                             <input type="checkbox" v-model="video.generateAudio" class="h-4 w-4 accent-indigo-500">
                             <span>生成音频</span>
                         </label>
-                        <div>
-                            <label class="block text-xs font-medium text-gray-400 mb-1.5">本地参考图</label>
-                            <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10" @dragover.prevent @drop.prevent="onReferenceDrop($event, 'video')">
-                                <input type="file" class="hidden" multiple accept="image/*" @change="onVideoFilesChange">
-                                <div class="flex flex-col items-center gap-2">
-                                    <svg class="w-5 h-5 text-indigo-400 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                                    <span class="text-xs text-gray-300">点击上传 / 拖入画廊素材</span>
-                                    <span class="text-[11px] text-indigo-300" v-if="videoFiles.length">已选择 {{ videoFiles.length }} 个文件</span>
-                                </div>
-                            </label>
-                        </div>
                         <div v-if="currentVideoCapability.usesReferenceUrlArrays">
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">本地参考视频</label>
                             <label class="compact-upload group block cursor-pointer rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-3 text-center transition hover:border-indigo-400/70 hover:bg-indigo-500/10">
@@ -607,6 +577,6 @@
         @keyframes shimmer { 100% { transform: translateX(100%); } }
         @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
-    <script src="/static/app.js?v=20260730-sora-reference-media"></script>
+    <script src="/static/app.js?v=20260924-reference-cards"></script>
 </body>
 </html>
