@@ -88,6 +88,15 @@ def init_config_db() -> None:
             conn.execute("ALTER TABLE media_tasks ADD COLUMN thumbnail_url TEXT")
         if "thumbnail_filename" not in columns:
             conn.execute("ALTER TABLE media_tasks ADD COLUMN thumbnail_filename TEXT")
+        # Apply to existing databases as well as fresh installations.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_media_tasks_created_at "
+            "ON media_tasks(created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_media_tasks_type_created_at "
+            "ON media_tasks(type, created_at DESC)"
+        )
 
 
 def read_saved_config() -> dict[str, Any]:
@@ -601,8 +610,13 @@ def db_list_tasks(page: int = 1, page_size: int = 25, task_type: str = "all") ->
     with sqlite3.connect(CONFIG_DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         total = int(conn.execute(f"SELECT COUNT(*) FROM media_tasks {where}", params).fetchone()[0])
+        # raw can contain megabytes of base64 image data. Exclude detail fields
+        # in SQL, rather than reading them and discarding them during serialization.
         rows = conn.execute(
-            f"SELECT * FROM media_tasks {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, remote_task_id, type, status, model, prompt, meta, "
+            "local_url, remote_url, filename, thumbnail_url, thumbnail_filename, "
+            "error, created_at, started_at, finished_at, duration_seconds "
+            f"FROM media_tasks {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (*params, page_size, offset),
         ).fetchall()
     total_pages = max(1, (total + page_size - 1) // page_size)
