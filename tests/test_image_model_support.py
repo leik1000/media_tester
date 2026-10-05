@@ -25,6 +25,13 @@ def _image_settings(**overrides):
 class _Response:
     status_code = 200
     text = "{}"
+    closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.closed = True
 
     def json(self):
         return {"data": []}
@@ -122,8 +129,10 @@ class ImagePayloadTests(unittest.TestCase):
             )
         )
 
-        with patch.object(image_runner.requests, "post", return_value=_Response()) as post:
+        response = _Response()
+        with patch.object(image_runner.requests, "post", return_value=response) as post:
             image_runner.create_openai_image(_image_settings(model="seedream-5-pro"), payload)
+        self.assertTrue(response.closed)
 
         args, kwargs = post.call_args
         self.assertEqual(args[0], "https://api.example.test/v1/images/generations")

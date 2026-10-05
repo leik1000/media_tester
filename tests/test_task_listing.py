@@ -81,9 +81,32 @@ class TaskListingTests(unittest.TestCase):
 
     def test_detail_still_includes_raw_payload_and_logs(self):
         task = media_app.db_get_task("2")
-        self.assertEqual(task["raw"], {"data": "x" * 100_000})
+        self.assertEqual(task["raw"], media_app.summarize_task_data({"data": "x" * 100_000}))
         self.assertEqual(task["request_payload"], {"prompt": "detail"})
         self.assertEqual(task["logs"], ["done"])
+
+    def test_status_never_reads_legacy_media_columns(self):
+        connect = sqlite3.connect
+
+        def guarded_connect(*args, **kwargs):
+            conn = connect(*args, **kwargs)
+
+            def authorize(action, table, column, database, source):
+                if action == sqlite3.SQLITE_READ and table == "media_tasks":
+                    if column in {"raw", "request_payload"}:
+                        return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            conn.set_authorizer(authorize)
+            return conn
+
+        with patch.object(media_app.sqlite3, "connect", side_effect=guarded_connect):
+            task = media_app.get_task_status("2")
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(task["logs"], ["done"])
+        self.assertEqual(task["image_url"], "/downloads/2.png")
+        self.assertNotIn("raw", task)
+        self.assertNotIn("request_payload", task)
 
     def test_startup_adds_indexes_to_existing_database_idempotently(self):
         with sqlite3.connect(self.db) as conn:

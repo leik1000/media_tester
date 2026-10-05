@@ -732,7 +732,7 @@ const app = createApp({
             previewImageTransformOrigin.value = 'center center';
         };
 
-        const openPreview = (item) => {
+        const openPreview = async (item) => {
             currentResult.value = item;
             currentLogs.value = item.logs || [];
             resetPreviewImageTransform();
@@ -740,6 +740,20 @@ const app = createApp({
                 selectedResult.value = item;
             }
             scrollLogs();
+            if (item.taskId) {
+                try {
+                    const res = await fetch(`/api/task/${encodeURIComponent(item.taskId)}?detail=true`);
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.message || '任务详情查询失败');
+                    updateResult(item.id, {
+                        requestPayload: data.request_payload,
+                        raw: data.raw,
+                        logs: data.logs || item.logs,
+                    });
+                } catch (error) {
+                    console.error('加载任务详情失败', error);
+                }
+            }
         };
 
         const onPreviewImageWheel = (event) => {

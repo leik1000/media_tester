@@ -268,15 +268,15 @@ def create_image(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str,
 
     base_url = str(settings["base_url"] or DEFAULT_BASE_URL).rstrip("/")
     url = f"{base_url}/v1beta/models/{settings['model']}:generateContent"
-    response = requests.post(
+    with requests.post(
         url,
         headers=build_headers(str(settings.get("api_key") or "")),
         json=payload,
         timeout=int(settings["request_timeout"]),
         proxies=settings.get("proxies"),
-    )
-    print(f"[POST] {url} -> {response.status_code}")
-    return response_json_or_error(response, url, "POST")
+    ) as response:
+        print(f"[POST] {url} -> {response.status_code}")
+        return response_json_or_error(response, url, "POST")
 
 
 def create_openai_image(settings: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -303,15 +303,15 @@ def create_openai_image(settings: dict[str, Any], payload: dict[str, Any]) -> di
         request_payload["aspect_ratio"] = payload["aspect_ratio"]
     if payload.get("quality"):
         request_payload["quality"] = payload["quality"]
-    response = requests.post(
+    with requests.post(
         url,
         headers=build_headers(api_key),
         json=request_payload,
         timeout=timeout,
         proxies=proxies,
-    )
-    print(f"[POST] {url} -> {response.status_code}")
-    return response_json_or_error(response, url, "POST")
+    ) as response:
+        print(f"[POST] {url} -> {response.status_code}")
+        return response_json_or_error(response, url, "POST")
 
 
 def create_openai_image_edit(
@@ -340,13 +340,13 @@ def create_openai_image_edit(
 
     try:
         for image_url in image_urls:
-            response = requests.get(image_url, timeout=timeout, proxies=proxies)
-            response.raise_for_status()
-            suffix = Path(urlparse(image_url).path or "").suffix or ".png"
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            tmp.write(response.content)
-            tmp.close()
-            temp_paths.append(tmp.name)
+            with requests.get(image_url, timeout=timeout, proxies=proxies, stream=True) as response:
+                response.raise_for_status()
+                suffix = Path(urlparse(image_url).path or "").suffix or ".png"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    temp_paths.append(tmp.name)
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        tmp.write(chunk)
             image_files.append(tmp.name)
 
         files = []
@@ -359,16 +359,16 @@ def create_openai_image_edit(
             handles.append(handle)
             files.append(("image", (path.name, handle, mime_type)))
 
-        response = requests.post(
+        with requests.post(
             url,
             headers=headers,
             data=data,
             files=files,
             timeout=timeout,
             proxies=proxies,
-        )
-        print(f"[POST] {url} -> {response.status_code}")
-        return response_json_or_error(response, url, "POST")
+        ) as response:
+            print(f"[POST] {url} -> {response.status_code}")
+            return response_json_or_error(response, url, "POST")
     finally:
         for handle in handles:
             handle.close()
@@ -390,10 +390,10 @@ def extract_inline_image(data: dict[str, Any], proxies: dict[str, str] | None = 
                 return base64.b64decode(raw_b64), "image/png"
             image_url = str(item.get("url") or "").strip()
             if image_url:
-                response = requests.get(image_url, timeout=DEFAULT_REQUEST_TIMEOUT, proxies=proxies)
-                response.raise_for_status()
-                mime_type = response.headers.get("Content-Type", "image/png").split(";", 1)[0]
-                return response.content, mime_type or "image/png"
+                with requests.get(image_url, timeout=DEFAULT_REQUEST_TIMEOUT, proxies=proxies) as response:
+                    response.raise_for_status()
+                    mime_type = response.headers.get("Content-Type", "image/png").split(";", 1)[0]
+                    return response.content, mime_type or "image/png"
 
     candidates = data.get("candidates") or []
     for candidate in candidates:
