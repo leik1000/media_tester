@@ -150,6 +150,14 @@
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">gpt-image-2.5-sunburst Key</label>
                                 <input type="password" class="glass-input text-sm" v-model="config.gptImage25SunburstApiKey" placeholder="此模型 API Key">
                             </div>
+                            <div v-else-if="image.model === 'gpt-image-2.5-flare-max'">
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">gpt-image-2.5-flare-max Key</label>
+                                <input type="password" class="glass-input text-sm" v-model="config.gptImage25FlareMaxApiKey" placeholder="此模型 API Key">
+                            </div>
+                            <div v-else-if="image.model === 'gpt-image-2.5-sunburst-max'">
+                                <label class="block text-xs font-medium text-gray-400 mb-1.5">gpt-image-2.5-sunburst-max Key</label>
+                                <input type="password" class="glass-input text-sm" v-model="config.gptImage25SunburstMaxApiKey" placeholder="此模型 API Key">
+                            </div>
                             <div v-else-if="image.model === 'seedream-5-pro'">
                                 <label class="block text-xs font-medium text-gray-400 mb-1.5">seedream-5-pro Key</label>
                                 <input type="password" class="glass-input text-sm" v-model="config.seedreamImageApiKey" placeholder="此模型 API Key">
@@ -188,9 +196,7 @@
                         <div v-if="imageSupportsQuality">
                             <label class="block text-xs font-medium text-gray-400 mb-1.5">质量</label>
                             <select class="glass-input text-sm appearance-none" v-model="image.quality">
-                                <option class="bg-gray-900" value="low">低</option>
-                                <option class="bg-gray-900" value="medium">中</option>
-                                <option class="bg-gray-900" value="high">高</option>
+                                <option v-for="quality in imageQualityOptions" :key="quality" class="bg-gray-900" :value="quality">{{ imageQualityLabels[quality] }}</option>
                             </select>
                         </div>
                         <reference-images :items="referenceImages.image"

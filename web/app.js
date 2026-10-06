@@ -81,6 +81,9 @@ const VIDEO_MODEL_CAPS = {
 };
 
 const IMAGE_SIZE_OPTIONS = ['1K', '2K', '4K'];
+const IMAGE_QUALITY_OPTIONS = ['low', 'medium', 'high'];
+const IMAGE_MAX_QUALITY_OPTIONS = [...IMAGE_QUALITY_OPTIONS, 'xhigh', 'max'];
+const IMAGE_QUALITY_LABELS = { low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' };
 const BASE_IMAGE_RATIOS = ['1:1', '4:3', '3:4', '5:4', '4:5', '3:2', '2:3', '16:9', '9:16', '21:9'];
 const SEEDREAM_IMAGE_RATIOS = ['9:21', '9:16', '2:3', '3:4', '1:1', '4:3', '3:2', '16:9', '21:9'];
 const GEMINI_LITE_IMAGE_RATIOS = ['8:1', '4:1', '21:9', '16:9', '3:2', '4:3', '5:4', '1:1'];
@@ -115,6 +118,18 @@ const IMAGE_MODEL_CAPS = {
     'seedream-5-pro': {
         ratios: SEEDREAM_IMAGE_RATIOS,
         sizes: ['1K', '2K'],
+    },
+    'gpt-image-2.5-flare-max': {
+        ratios: BASE_IMAGE_RATIOS,
+        sizes: IMAGE_SIZE_OPTIONS,
+        supportsQuality: true,
+        qualities: IMAGE_MAX_QUALITY_OPTIONS,
+    },
+    'gpt-image-2.5-sunburst-max': {
+        ratios: BASE_IMAGE_RATIOS,
+        sizes: IMAGE_SIZE_OPTIONS,
+        supportsQuality: true,
+        qualities: IMAGE_MAX_QUALITY_OPTIONS,
     },
 };
 
@@ -185,6 +200,8 @@ const app = createApp({
             gptImage2ApiKey: '',
             gptImage25FlareApiKey: '',
             gptImage25SunburstApiKey: '',
+            gptImage25FlareMaxApiKey: '',
+            gptImage25SunburstMaxApiKey: '',
             seedreamImageApiKey: '',
             gemini3ProImageApiKey: '',
             gemini31FlashImageApiKey: '',
@@ -235,6 +252,7 @@ const app = createApp({
         const imageAspectRatios = computed(() => currentImageCapability.value.ratios);
         const imageSizeOptions = computed(() => currentImageCapability.value.sizes || IMAGE_SIZE_OPTIONS);
         const imageSupportsQuality = computed(() => currentImageCapability.value.supportsQuality === true);
+        const imageQualityOptions = computed(() => currentImageCapability.value.qualities || IMAGE_QUALITY_OPTIONS);
         const currentVideoCapability = computed(() => VIDEO_MODEL_CAPS[video.model] || VIDEO_MODEL_CAPS.sora2);
         const videoSupportsResolution = computed(() => currentVideoCapability.value.exposesResolution !== false);
         const videoDurationOptions = computed(() => currentVideoCapability.value.durations || []);
@@ -250,6 +268,9 @@ const app = createApp({
             if (!cap.ratios.includes(image.aspectRatio)) image.aspectRatio = cap.ratios[0];
             const sizes = cap.sizes || IMAGE_SIZE_OPTIONS;
             if (!sizes.includes(image.size)) image.size = defaultImageSize(sizes);
+            if (imageSupportsQuality.value && !imageQualityOptions.value.includes(image.quality)) {
+                image.quality = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'].includes(image.model) ? 'high' : 'medium';
+            }
         };
 
         const normalizeVideoSettings = () => {
@@ -360,6 +381,8 @@ const app = createApp({
             gptImage2ApiKey: config.gptImage2ApiKey,
             gptImage25FlareApiKey: config.gptImage25FlareApiKey,
             gptImage25SunburstApiKey: config.gptImage25SunburstApiKey,
+            gptImage25FlareMaxApiKey: config.gptImage25FlareMaxApiKey,
+            gptImage25SunburstMaxApiKey: config.gptImage25SunburstMaxApiKey,
             seedreamImageApiKey: config.seedreamImageApiKey,
             gemini3ProImageApiKey: config.gemini3ProImageApiKey,
             gemini31FlashImageApiKey: config.gemini31FlashImageApiKey,
@@ -402,7 +425,7 @@ const app = createApp({
 
         const applySavedConfig = (savedData) => {
             const savedConfig = savedData.config || {};
-            ['baseUrl', 'publicMediaBaseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'gptImage25FlareApiKey', 'gptImage25SunburstApiKey', 'seedreamImageApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey', 'gemini31FlashLiteImageApiKey'].forEach(key => {
+            ['baseUrl', 'publicMediaBaseUrl', 'enableProxy', 'proxyUrl', 'gptImage2ApiKey', 'gptImage25FlareApiKey', 'gptImage25SunburstApiKey', 'gptImage25FlareMaxApiKey', 'gptImage25SunburstMaxApiKey', 'seedreamImageApiKey', 'gemini3ProImageApiKey', 'gemini31FlashImageApiKey', 'gemini31FlashLiteImageApiKey'].forEach(key => {
                 if (Object.prototype.hasOwnProperty.call(savedConfig, key)) {
                     config[key] = savedConfig[key];
                 }
@@ -534,6 +557,8 @@ const app = createApp({
                 'gpt-image-2': config.gptImage2ApiKey,
                 'gpt-image-2.5-flare': config.gptImage25FlareApiKey,
                 'gpt-image-2.5-sunburst': config.gptImage25SunburstApiKey,
+                'gpt-image-2.5-flare-max': config.gptImage25FlareMaxApiKey,
+                'gpt-image-2.5-sunburst-max': config.gptImage25SunburstMaxApiKey,
                 'seedream-5-pro': config.seedreamImageApiKey,
                 'gemini-3-pro-image-preview': config.gemini3ProImageApiKey,
                 'gemini-3.1-flash-image-preview': config.gemini31FlashImageApiKey,
@@ -1074,7 +1099,7 @@ const app = createApp({
             tab, isLoading, isSubmitting,
             authSettings, systemSettings,
             config, image, video,
-            imageModelOptions, videoModelOptions, currentImageCapability, imageAspectRatios, imageSizeOptions, imageSupportsQuality, currentVideoCapability, videoSupportsResolution, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
+            imageModelOptions, videoModelOptions, currentImageCapability, imageAspectRatios, imageSizeOptions, imageSupportsQuality, imageQualityOptions, imageQualityLabels: IMAGE_QUALITY_LABELS, currentVideoCapability, videoSupportsResolution, videoDurationOptions, videoDurationRange, videoDurationMin, videoDurationMax,
             videoReferenceFiles, audioReferenceFiles,
             imageReferenceCount, videoReferenceCount, videoUrlReferenceCount, audioUrlReferenceCount, totalVideoMediaReferenceCount,
             onVideoReferenceFilesChange, onAudioReferenceFilesChange,

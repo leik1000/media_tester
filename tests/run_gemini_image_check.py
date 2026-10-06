@@ -26,6 +26,8 @@ MODEL_OPTIONS = [
     "gpt-image-2",
     "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-flare-max",
+    "gpt-image-2.5-sunburst-max",
     "seedream-5-pro",
 ]
 ASPECT_RATIO_OPTIONS = [
@@ -46,13 +48,19 @@ ASPECT_RATIO_OPTIONS = [
     "8:1",
 ]
 IMAGE_SIZE_OPTIONS = ["1K", "2K", "4K"]
+OPENAI_MAX_QUALITY_MODELS = {
+    "gpt-image-2.5-flare-max",
+    "gpt-image-2.5-sunburst-max",
+}
 OPENAI_IMAGE_MODELS = {
+    *OPENAI_MAX_QUALITY_MODELS,
     "gpt-image-2",
     "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst",
     "seedream-5-pro",
 }
 OPENAI_QUALITY_MODELS = {
+    *OPENAI_MAX_QUALITY_MODELS,
     "gpt-image-2",
     "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst",
@@ -66,6 +74,7 @@ OPENAI_RESOLUTION_SIZE_OPTIONS = {
     "seedream-5-pro": ["1K", "2K"],
 }
 OPENAI_QUALITY_OPTIONS = ["low", "medium", "high"]
+OPENAI_MAX_QUALITY_OPTIONS = [*OPENAI_QUALITY_OPTIONS, "xhigh", "max"]
 DEFAULT_OPENAI_QUALITY = "medium"
 OPENAI_IMAGE_SIZE_MAP = {
     ("1K", "1:1"): "1024x1024",
@@ -181,6 +190,12 @@ def supports_openai_quality(model: str) -> bool:
 def normalize_openai_quality(model: str, quality: str) -> str | None:
     normalized_model = str(model or "").strip()
     normalized_quality = str(quality or "").strip().lower()
+    if normalized_model in OPENAI_MAX_QUALITY_MODELS:
+        return (
+            normalized_quality
+            if normalized_quality in OPENAI_MAX_QUALITY_OPTIONS
+            else DEFAULT_OPENAI_QUALITY
+        )
     if normalized_model in OPENAI_QUALITY_FALLBACK_HIGH_MODELS:
         if normalized_quality in OPENAI_QUALITY_OPTIONS:
             return normalized_quality
